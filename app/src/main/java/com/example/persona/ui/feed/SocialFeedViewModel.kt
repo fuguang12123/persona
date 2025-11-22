@@ -6,36 +6,38 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.persona.data.model.Persona
-import com.example.persona.data.remote.PersonaService
+import com.example.persona.data.repository.PersonaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class SocialFeedViewModel @Inject constructor(
-    private val personaService: PersonaService
+    private val repository: PersonaRepository // ✅ 注入 Repository
 ) : ViewModel() {
 
     var feedList by mutableStateOf<List<Persona>>(emptyList())
     var isLoading by mutableStateOf(false)
 
     init {
+        // 1. 订阅数据库 (离线数据秒开)
+        viewModelScope.launch {
+            repository.getFeedStream().collect { list ->
+                feedList = list
+            }
+        }
+
+        // 2. 触发网络刷新
         loadFeed()
     }
 
     fun loadFeed() {
         viewModelScope.launch {
             isLoading = true
-            try {
-                val response = personaService.getFeed()
-                if (response.isSuccessful && response.body()?.code == 200) {
-                    feedList = response.body()?.data ?: emptyList()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                isLoading = false
-            }
+            // 只需调用刷新，不需要处理返回值
+            // 数据更新会通过上面的 collect 自动送达
+            repository.refreshFeed()
+            isLoading = false
         }
     }
 }

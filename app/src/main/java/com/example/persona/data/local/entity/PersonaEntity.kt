@@ -4,13 +4,18 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+/**
+ * 数据库实体 (Room Entity)
+ * 用于实现"广场列表"的离线缓存
+ */
 @Entity(tableName = "personas")
 data class PersonaEntity(
+    // 这里不使用 autoGenerate，因为我们要严格对应服务器的 ID
     @PrimaryKey
-    val id: Long, // 这里不自增，因为 ID 是从服务器拉下来的，保持一致
+    val id: Long,
 
     @ColumnInfo(name = "user_id")
-    val userId: Long, // 归属用户
+    val userId: Long,
 
     val name: String,
 
@@ -20,8 +25,8 @@ data class PersonaEntity(
     val description: String?,
 
     @ColumnInfo(name = "personality_tags")
-    val personalityTags: String?, // 对应逗号分隔的字符串
+    val personalityTags: String?,
 
     @ColumnInfo(name = "is_public")
-    val isPublic: Boolean = true
+    val isPublic: Boolean
 )

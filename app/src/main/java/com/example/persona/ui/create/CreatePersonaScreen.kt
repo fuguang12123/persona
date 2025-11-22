@@ -22,6 +22,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -35,6 +36,14 @@ fun CreatePersonaScreen(
     onBack: () -> Unit,
     viewModel: CreateViewModel = hiltViewModel()
 ) {
+    // ✅ 核心修改：监听 ViewModel 的导航状态
+    LaunchedEffect(viewModel.navigateBack) {
+        if (viewModel.navigateBack) {
+            onBack() // 执行路由跳转
+            viewModel.onNavigated() // 重置状态，防止重复跳转
+        }
+    }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("Create Persona") }) }
     ) { padding ->
@@ -83,7 +92,7 @@ fun CreatePersonaScreen(
                 }
             }
 
-            // 4. 描述输入框 (支持 AI 回填)
+            // 4. 描述输入框
             OutlinedTextField(
                 value = viewModel.description,
                 onValueChange = { viewModel.description = it },
@@ -95,7 +104,8 @@ fun CreatePersonaScreen(
 
             // 5. 保存按钮
             Button(
-                onClick = { viewModel.onSaveClick(onSuccess = onBack) },
+                // ✅ 核心修改：这里不再传递 onSuccess 回调，而是只触发事件
+                onClick = { viewModel.onSaveClick() },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 enabled = !viewModel.isSaving && viewModel.name.isNotBlank()
             ) {

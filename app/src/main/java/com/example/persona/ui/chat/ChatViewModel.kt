@@ -6,16 +6,16 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.persona.data.model.ChatMessage
-import com.example.persona.data.remote.PersonaService
 import com.example.persona.data.repository.ChatRepository
+import com.example.persona.data.repository.PersonaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val chatRepository: ChatRepository, // ✅ 替换了 ChatService
-    private val personaService: PersonaService  // 暂时保留，用于获取头像/名字
+    private val chatRepository: ChatRepository,
+    private val personaRepository: PersonaRepository // ✅ 修正：使用 Repository
 ) : ViewModel() {
 
     // UI State
@@ -34,16 +34,12 @@ class ChatViewModel @Inject constructor(
         currentPersonaId = personaId
 
         // 1. 启动监听：观察本地数据库 (SSOT 核心)
-        // 只要 Repository 修改了数据库，这里就会自动收到最新的列表
         viewModelScope.launch {
             chatRepository.getMessagesStream(personaId).collect { entities ->
-                // 将 Entity (数据库模型) 转换为 UI 模型
                 messages = entities.map { entity ->
                     ChatMessage(
                         role = entity.role,
                         content = entity.content
-                        // 如果 ChatMessage 有 id 或 timestamp，也可以在这里赋值
-                        // id = entity.id
                     )
                 }
             }
@@ -54,26 +50,23 @@ class ChatViewModel @Inject constructor(
             chatRepository.refreshHistory(personaId)
         }
 
-        // 3. 加载角色信息 (保持原有逻辑)
+        // 3. 加载角色信息
         loadPersonaInfo()
     }
 
     private fun loadPersonaInfo() {
         viewModelScope.launch {
-            try {
-                val resp = personaService.getPersona(currentPersonaId)
-                if (resp.isSuccessful && resp.body()?.data != null) {
-                    val persona = resp.body()!!.data!!
-                    personaName = persona.name
-                    // 获取头像 URL
-                    personaAvatarUrl = if (!persona.avatarUrl.isNullOrBlank()) {
-                        persona.avatarUrl
-                    } else {
-                        "https://api.dicebear.com/7.x/avataaars/png?seed=${persona.name}"
-                    }
+            // ✅ 修正：Repository 已经处理了 BaseResponse，直接返回 Persona? 对象
+            // 这里不需要 .body() 或 .isSuccess()
+            val persona = personaRepository.getPersona(currentPersonaId)
+
+            if (persona != null) {
+                personaName = persona.name
+                personaAvatarUrl = if (!persona.avatarUrl.isNullOrBlank()) {
+                    persona.avatarUrl
+                } else {
+                    "https://api.dicebear.com/7.x/avataaars/png?seed=${persona.name}"
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
         }
     }
@@ -83,7 +76,7 @@ class ChatViewModel @Inject constructor(
 
         isSending = true
         viewModelScope.launch {
-            // Repository 会先插入本地(UI秒变)，再请求网络，再更新回复
+            // 仓库层处理了乐观更新，UI 会自动刷新
             chatRepository.sendMessage(currentPersonaId, text)
             isSending = false
         }

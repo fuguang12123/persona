@@ -1,6 +1,5 @@
 package com.example.persona.ui.login
 
-
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,7 +32,15 @@ fun LoginScreen(
     val uiState = viewModel.uiState
     val context = LocalContext.current
 
-    // 监听状态变化，处理错误或成功
+    // ✅ 核心修改 1：监听 ViewModel 的跳转状态 (兼容自动登录)
+    LaunchedEffect(viewModel.loginSuccess) {
+        if (viewModel.loginSuccess) {
+            onLoginSuccess() // 执行跳转
+            viewModel.onNavigated() // 重置状态
+        }
+    }
+
+    // 监听错误提示
     LaunchedEffect(uiState) {
         if (uiState is LoginUiState.Error) {
             Toast.makeText(context, uiState.msg, Toast.LENGTH_SHORT).show()
@@ -57,7 +65,7 @@ fun LoginScreen(
         OutlinedTextField(
             value = viewModel.username,
             onValueChange = { viewModel.username = it },
-            label = { Text("Username") },
+            label = { Text("Username (Try 'admin')") }, // 提示语改一下
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -75,8 +83,10 @@ fun LoginScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // 登录按钮
         Button(
-            onClick = { viewModel.onLoginClick(onLoginSuccess) },
+            // ✅ 核心修改 2：调用无参方法
+            onClick = { viewModel.onLoginClick() },
             modifier = Modifier.fillMaxWidth().height(50.dp),
             enabled = uiState !is LoginUiState.Loading
         ) {
@@ -86,8 +96,19 @@ fun LoginScreen(
                     modifier = Modifier.size(24.dp)
                 )
             } else {
-                Text("Login / Register")
+                Text("Login")
             }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ✅ 核心修改 3：新增离线体验按钮 (方便你断网测试)
+        OutlinedButton(
+            onClick = { viewModel.onOfflineGuestClick() },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            enabled = uiState !is LoginUiState.Loading
+        ) {
+            Text("离线体验模式 (Skip Login)")
         }
     }
 }
