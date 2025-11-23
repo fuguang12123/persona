@@ -8,29 +8,58 @@ import androidx.room.Update
 import com.example.persona.data.local.entity.ChatMessageEntity
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * 用于 UI 展示会话列表的视图对象
+ */
+data class ConversationView(
+    val personaId: Long,
+    val name: String,
+    val avatarUrl: String,
+    val lastMessage: String,
+    val timestamp: String? // [关键修改] 数据库存的是 "2025-..." 字符串，所以这里用 String 接收
+)
+
 @Dao
 interface ChatDao {
-    // 获取特定用户与特定分身的聊天记录
+    // --- 基础功能 ---
+
     @Query("""
         SELECT * FROM chat_messages 
         WHERE user_id = :userId AND persona_id = :personaId 
-        ORDER BY id ASC
+        ORDER BY created_at ASC
     """)
     fun getChatHistory(userId: Long, personaId: Long): Flow<List<ChatMessageEntity>>
 
-    // ✅ 修改 1: 让插入操作返回新生成的 Row ID (Long)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: ChatMessageEntity): Long
 
-    // 批量插入
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessages(messages: List<ChatMessageEntity>)
 
-    // ✅ 修改 2: 新增更新方法，用于标记发送失败
     @Update
     suspend fun updateMessage(message: ChatMessageEntity)
 
-    // 清空某段对话
     @Query("DELETE FROM chat_messages WHERE user_id = :userId AND persona_id = :personaId")
     suspend fun clearHistory(userId: Long, personaId: Long)
+
+    // --- 会话列表 ---
+
+    @Query("""
+        SELECT 
+            p.id as personaId, 
+            p.name as name, 
+            p.avatar_url as avatarUrl, 
+            m.content as lastMessage, 
+            m.created_at as timestamp  
+        FROM personas p 
+        INNER JOIN chat_messages m ON p.id = m.persona_id 
+        WHERE m.user_id = :userId 
+        AND m.created_at = (
+            SELECT MAX(created_at) 
+            FROM chat_messages 
+            WHERE persona_id = p.id AND user_id = :userId
+        )
+        ORDER BY m.created_at DESC
+    """)
+    fun getConversations(userId: Long): Flow<List<ConversationView>>
 }

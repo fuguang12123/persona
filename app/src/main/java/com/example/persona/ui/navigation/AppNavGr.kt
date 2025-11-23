@@ -6,6 +6,8 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.persona.Screen // 引用 MainActivity 中定义的 Screen
+import com.example.persona.ui.feed.PostFeedScreen
 import com.example.persona.ui.login.LoginScreen
 import com.example.persona.ui.screens.SocialFeedScreen
 
@@ -20,23 +22,31 @@ fun AppNavGraph(
         startDestination = startDestination,
         modifier = modifier
     ) {
-        // 1. 登录页路由
+        // 1. 登录页
         composable(Screen.Login.route) {
             LoginScreen(
                 onLoginSuccess = {
-                    // 登录成功后，跳转到广场，并把登录页从后退栈中弹出（防止用户按返回键回到登录页）
-                    navController.navigate(Screen.SocialFeed.route) {
+                    // Day 7 测试路由: 跳转到新的动态广场 Screen.PostFeed.route
+                    navController.navigate(Screen.PostFeed.route) {
                         popUpTo(Screen.Login.route) { inclusive = true }
                     }
                 }
             )
         }
 
-        // 2. 广场页路由
+        // 2. 广场页 (旧列表)
         composable(Screen.SocialFeed.route) {
             SocialFeedScreen()
         }
 
-        // 后续会在这里添加 Chat 和 Creation 页面
+        // 3. 动态广场 (新瀑布流)
+        composable(Screen.PostFeed.route) {
+            PostFeedScreen(
+                onPostClick = { /* TODO */ },
+                onCreatePostClick = { /* TODO */ }
+            )
+        }
+
+        // ... 其他页面
     }
 }
