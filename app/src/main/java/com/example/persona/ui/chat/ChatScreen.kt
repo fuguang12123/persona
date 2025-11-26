@@ -1,6 +1,8 @@
 package com.example.persona.ui.chat
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,6 +55,7 @@ import com.example.persona.data.model.ChatMessage
 fun ChatScreen(
     personaId: Long,
     onBack: () -> Unit,
+    onPersonaDetailClick: (Long) -> Unit,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val listState = rememberLazyListState()
@@ -60,9 +64,13 @@ fun ChatScreen(
         viewModel.initChat(personaId)
     }
 
+    // [New] 优化：自动回滚到最新消息
+    // 监听消息数量变化 (发送或接收新消息时 size 会增加)
     LaunchedEffect(viewModel.messages.size) {
         if (viewModel.messages.isNotEmpty()) {
-            listState.animateScrollToItem(viewModel.messages.size - 1)
+            // 因为启用了 reverseLayout = true，列表底部是 Index 0
+            // 所以这里滚动到 0 即可实现“回滚到最下方”
+            listState.animateScrollToItem(0)
         }
     }
 
@@ -73,6 +81,11 @@ fun ChatScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { onPersonaDetailClick(personaId) }) {
+                        Icon(Icons.Default.Info, contentDescription = "Detail")
                     }
                 }
             )
@@ -90,13 +103,20 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
             state = listState,
-            verticalArrangement = Arrangement.spacedBy(16.dp), // 增加气泡间距
+            // [Fix] 保持倒序布局，这对聊天应用至关重要
+            reverseLayout = true,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
-            items(viewModel.messages) { msg ->
+            items(
+                items = viewModel.messages,
+                key = { it.id }
+            ) { msg ->
                 ChatBubble(
                     msg = msg,
-                    personaAvatarUrl = viewModel.personaAvatarUrl
+                    personaAvatarUrl = viewModel.personaAvatarUrl,
+                    personaName = viewModel.personaName,
+                    onAvatarClick = { onPersonaDetailClick(personaId) }
                 )
             }
         }
@@ -104,33 +124,39 @@ fun ChatScreen(
 }
 
 @Composable
-fun ChatBubble(msg: ChatMessage, personaAvatarUrl: String) {
+fun ChatBubble(
+    msg: ChatMessage,
+    personaAvatarUrl: String,
+    personaName: String?,
+    onAvatarClick: () -> Unit
+) {
     val isUser = msg.role == "user"
 
-    // 使用 Row 实现左右布局
     Row(
         modifier = Modifier.fillMaxWidth(),
-        // 如果是用户，内容靠右；如果是 AI，内容靠左
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Top // 头像和气泡顶部对齐
+        verticalAlignment = Alignment.Top
     ) {
-        // 🤖 左侧：AI 头像 (只在非用户时显示)
+        // 🤖 左侧：AI 头像
         if (!isUser) {
-            ChatAvatar(url = personaAvatarUrl)
+            Box(modifier = Modifier.clickable { onAvatarClick() }) {
+                ChatAvatar(
+                    url = personaAvatarUrl,
+                    name = personaName ?: "AI"
+                )
+            }
             Spacer(modifier = Modifier.width(8.dp))
         }
 
-        // 💬 中间：气泡
         Surface(
             color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(
                 topStart = 16.dp,
                 topEnd = 16.dp,
-                // 根据发送者，调整下角的圆角，做出"小尾巴"的感觉
                 bottomStart = if (isUser) 16.dp else 4.dp,
                 bottomEnd = if (isUser) 4.dp else 16.dp
             ),
-            modifier = Modifier.widthIn(max = 260.dp) // 限制气泡最大宽度
+            modifier = Modifier.widthIn(max = 260.dp)
         ) {
             Text(
                 text = msg.content ?: "",
@@ -140,19 +166,26 @@ fun ChatBubble(msg: ChatMessage, personaAvatarUrl: String) {
             )
         }
 
-        // 👤 右侧：用户头像 (只在用户时显示)
+        // 👤 右侧：用户头像
         if (isUser) {
             Spacer(modifier = Modifier.width(8.dp))
-            // 用户的头像暂时写死或者用 DiceBear 生成一个固定的
-            ChatAvatar(url = "https://api.dicebear.com/7.x/avataaars/png?seed=User123")
+            ChatAvatar(
+                url = "",
+                name = "User"
+            )
         }
     }
 }
 
 @Composable
-fun ChatAvatar(url: String) {
-    // 处理 SVG 转 PNG (以防万一)
-    val finalUrl = url.replace("/svg", "/png")
+fun ChatAvatar(url: String, name: String) {
+    val finalUrl = remember(url, name) {
+        if (url.isBlank()) {
+            "https://api.dicebear.com/7.x/avataaars/png?seed=$name"
+        } else {
+            url.replace("/svg", "/png")
+        }
+    }
 
     Surface(
         modifier = Modifier.size(40.dp),
@@ -173,7 +206,6 @@ fun ChatAvatar(url: String) {
     }
 }
 
-// ChatInput 保持不变
 @Composable
 fun ChatInput(onSend: (String) -> Unit, enabled: Boolean) {
     var text by remember { mutableStateOf("") }
@@ -190,7 +222,7 @@ fun ChatInput(onSend: (String) -> Unit, enabled: Boolean) {
             modifier = Modifier.weight(1f),
             placeholder = { Text("Type a message...") },
             maxLines = 3,
-            shape = RoundedCornerShape(24.dp) // 稍微圆润一点的输入框
+            shape = RoundedCornerShape(24.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
         IconButton(

@@ -1,23 +1,57 @@
 package com.example.persona.data.model
-import com.google.gson.annotations.SerializedName
 
-// 1. 统一响应外壳 (匹配后端 Result<T>)
+// 统一的 API 响应包装类
 data class ApiResponse<T>(
-    @SerializedName("code") val code: Int,
-    @SerializedName("message") val message: String,
-    @SerializedName("data") val data: T?
+    val code: Int = 0,
+    val message: String? = null,
+    val data: T? = null
 )
 
-// 2. 登录请求体
+// 登录相关
 data class LoginRequest(
     val username: String,
-    // 后端目前可能是明文，后续建议加密
     val password: String
 )
 
-// 3. 登录成功返回的数据
 data class AuthData(
-    @SerializedName("token") val token: String,
-    @SerializedName("userId") val userId: String,
-    @SerializedName("username") val username: String
+    val token: String,
+    val userId: String,
+    val username: String,
+    val avatarUrl: String?
+)
+
+// 注册相关
+data class RegisterRequest(
+    val username: String,
+    val password: String,
+    val confirmPassword: String,
+    val captchaUuid: String,
+    val captchaCode: String
+)
+
+// 验证码
+data class CaptchaDto(
+    val uuid: String,
+    val image: String
+)
+
+// 用户资料
+data class UserDto(
+    val id: Long,
+    val username: String,
+    val nickname: String?,
+    val avatarUrl: String?,
+    val backgroundImageUrl: String?
+)
+
+data class UpdateProfileRequest(
+    val nickname: String? = null,
+    val avatarUrl: String? = null,
+    val backgroundImageUrl: String? = null
+)
+
+// 修改密码
+data class ChangePasswordRequest(
+    val oldPassword: String,
+    val newPassword: String
 )

@@ -15,7 +15,7 @@ import javax.inject.Inject
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
-    private val personaRepository: PersonaRepository // ✅ 修正：使用 Repository
+    private val personaRepository: PersonaRepository
 ) : ViewModel() {
 
     // UI State
@@ -33,11 +33,14 @@ class ChatViewModel @Inject constructor(
     fun initChat(personaId: Long) {
         currentPersonaId = personaId
 
-        // 1. 启动监听：观察本地数据库 (SSOT 核心)
+        // 1. 启动监听
         viewModelScope.launch {
             chatRepository.getMessagesStream(personaId).collect { entities ->
+                // [Fix] 移除了 sortedBy，信任数据库的 DESC 排序
+                // 直接映射为 UI 模型，无需重新排序，性能更好
                 messages = entities.map { entity ->
                     ChatMessage(
+                        id = entity.id,
                         role = entity.role,
                         content = entity.content
                     )
@@ -45,7 +48,7 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        // 2. 触发刷新：从云端拉取最新历史 (静默更新)
+        // 2. 触发刷新
         viewModelScope.launch {
             chatRepository.refreshHistory(personaId)
         }
@@ -56,10 +59,7 @@ class ChatViewModel @Inject constructor(
 
     private fun loadPersonaInfo() {
         viewModelScope.launch {
-            // ✅ 修正：Repository 已经处理了 BaseResponse，直接返回 Persona? 对象
-            // 这里不需要 .body() 或 .isSuccess()
             val persona = personaRepository.getPersona(currentPersonaId)
-
             if (persona != null) {
                 personaName = persona.name
                 personaAvatarUrl = if (!persona.avatarUrl.isNullOrBlank()) {
@@ -76,7 +76,6 @@ class ChatViewModel @Inject constructor(
 
         isSending = true
         viewModelScope.launch {
-            // 仓库层处理了乐观更新，UI 会自动刷新
             chatRepository.sendMessage(currentPersonaId, text)
             isSending = false
         }

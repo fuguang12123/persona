@@ -1,8 +1,10 @@
 package com.example.persona
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
@@ -10,11 +12,19 @@ import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.DynamicFeed
 import androidx.compose.material.icons.filled.PersonOutline
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -23,63 +33,98 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.persona.data.manager.SessionManager
+import com.example.persona.ui.MainViewModel
 import com.example.persona.ui.chat.ChatScreen
-import com.example.persona.ui.chat.list.ChatListScreen // [New]
+import com.example.persona.ui.chat.list.ChatListScreen
 import com.example.persona.ui.create.CreatePersonaScreen
 import com.example.persona.ui.create.CreatePostScreen
+import com.example.persona.ui.detail.PersonaDetailScreen
+import com.example.persona.ui.detail.PostDetailScreen
 import com.example.persona.ui.feed.PostFeedScreen
 import com.example.persona.ui.feed.SocialFeedScreen
 import com.example.persona.ui.login.LoginScreen
+import com.example.persona.ui.login.RegisterScreen
+import com.example.persona.ui.notification.NotificationScreen
+import com.example.persona.ui.profile.EditProfileScreen
 import com.example.persona.ui.profile.ProfileScreen
+import com.example.persona.ui.profile.SettingsScreen
 import com.example.persona.ui.theme.PersonaTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 sealed class Screen(val route: String, val title: String, val icon: ImageVector? = null) {
     object Login : Screen("login", "登录")
-
-    // 底部导航 Tab (调整顺序)
-    object ChatList : Screen("chat_list", "对话", Icons.Default.ChatBubble) // [New]
+    object Register : Screen("register", "注册")
+    object ChatList : Screen("chat_list", "对话", Icons.Default.ChatBubble)
     object SocialFeed : Screen("feed", "智能体", Icons.Default.Contacts)
-    object CreatePost : Screen("create_post", "发布", Icons.Default.AddCircleOutline)
+    object CreatePost : Screen("create_post?personaId={personaId}", "发布", Icons.Default.AddCircleOutline) {
+        fun createRoute(personaId: Long? = null) = if (personaId != null) "create_post?personaId=$personaId" else "create_post"
+    }
     object PostFeed : Screen("post_feed", "动态", Icons.Default.DynamicFeed)
     object Profile : Screen("profile", "我的", Icons.Default.PersonOutline)
-
-    // 详情页
-    object CreatePersona : Screen("create_persona", "创建智能体")
+    object Settings : Screen("settings", "设置")
+    object EditProfile : Screen("edit_profile", "编辑资料") // ✅ [New]
+    object CreatePersona : Screen("create_persona?editId={editId}", "创建智能体") {
+        fun createRoute(editId: Long? = null) = if (editId != null) "create_persona?editId=$editId" else "create_persona"
+    }
     object Chat : Screen("chat/{personaId}", "聊天") {
         fun createRoute(id: Long) = "chat/$id"
     }
+    object PostDetail : Screen("post_detail/{postId}", "动态详情") {
+        fun createRoute(id: Long) = "post_detail/$id"
+    }
+    object PersonaDetail : Screen("persona_detail/{personaId}", "智能体详情") {
+        fun createRoute(id: Long) = "persona_detail/$id"
+    }
+    object Notification : Screen("notifications", "通知")
 }
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var sessionManager: SessionManager
+
+    // 注入 MainViewModel 以处理启动逻辑
+    private val mainViewModel: MainViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // ✅ [New] App 启动时检查 Token 自动登录/续期
+        mainViewModel.checkAndRefreshToken()
+
         setContent {
             PersonaTheme {
-                MainAppScreen()
+                MainAppScreen(sessionManager)
             }
         }
     }
 }
 
 @Composable
-fun MainAppScreen() {
+fun MainAppScreen(sessionManager: SessionManager) {
     val navController = rememberNavController()
+    val context = LocalContext.current
 
-    // 底部导航项 (5个)
-    val bottomNavItems = listOf(
-        Screen.ChatList,   // 1. 对话 (历史记录)
-        Screen.SocialFeed, // 2. 智能体 (通讯录)
-        Screen.CreatePost, // 3. 发布 (中间)
-        Screen.PostFeed,   // 4. 动态 (广场)
-        Screen.Profile     // 5. 我的
-    )
+    LaunchedEffect(Unit) {
+        sessionManager.logoutEvent.collect {
+            Toast.makeText(context, "登录已过期，请重新登录", Toast.LENGTH_SHORT).show()
+            navController.navigate(Screen.Login.route) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
 
+    val bottomNavItems = listOf(Screen.ChatList, Screen.SocialFeed, Screen.CreatePost, Screen.PostFeed, Screen.Profile)
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
     val currentRoute = currentDestination?.route
-    val showBottomBar = currentRoute in bottomNavItems.map { it.route }
+
+    val showBottomBar = currentRoute in listOf(
+        Screen.ChatList.route, Screen.SocialFeed.route, Screen.CreatePost.route, Screen.PostFeed.route, Screen.Profile.route
+    ) || currentRoute?.startsWith("create_post") == true
 
     Scaffold(
         bottomBar = {
@@ -109,74 +154,103 @@ fun MainAppScreen() {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.Login.route, // 初始页
+            startDestination = Screen.Login.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            // 登录
+            // ... (Login, Register, ChatList 等保持不变) ...
             composable(Screen.Login.route) {
-                LoginScreen(onLoginSuccess = {
-                    navController.navigate(Screen.ChatList.route) { // 登录后去对话列表
-                        popUpTo(Screen.Login.route) { inclusive = true }
-                    }
-                })
+                LoginScreen(
+                    onLoginSuccess = {
+                        navController.navigate(Screen.ChatList.route) { popUpTo(Screen.Login.route) { inclusive = true } }
+                    },
+                    onRegisterClick = { navController.navigate(Screen.Register.route) }
+                )
             }
-
-            // Tab 1: 对话列表
+            composable(Screen.Register.route) {
+                RegisterScreen(
+                    onBackClick = { navController.popBackStack() },
+                    onRegisterSuccess = {
+                        navController.navigate(Screen.ChatList.route) { popUpTo(Screen.Login.route) { inclusive = true } }
+                    }
+                )
+            }
             composable(Screen.ChatList.route) {
                 ChatListScreen(
-                    onChatClick = { personaId ->
-                        navController.navigate(Screen.Chat.createRoute(personaId))
-                    }
+                    onChatClick = { pid -> navController.navigate(Screen.Chat.createRoute(pid)) },
+                    onNotificationClick = { navController.navigate(Screen.Notification.route) }
                 )
             }
-
-            // Tab 2: 智能体 (通讯录)
+            composable(Screen.Notification.route) {
+                NotificationScreen(
+                    onBackClick = { navController.popBackStack() },
+                    onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) }
+                )
+            }
             composable(Screen.SocialFeed.route) {
                 SocialFeedScreen(
-                    onPersonaClick = { personaId ->
-                        navController.navigate(Screen.Chat.createRoute(personaId))
-                    },
-                    onCreateClick = {
-                        navController.navigate(Screen.CreatePersona.route)
-                    }
+                    onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) },
+                    onCreateClick = { navController.navigate(Screen.CreatePersona.createRoute()) }
                 )
             }
-
-            // Tab 3: 发布动态
-            composable(Screen.CreatePost.route) {
+            composable(route = Screen.CreatePost.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType; defaultValue = -1L })) {
                 CreatePostScreen(
-                    personaId = 1L,
                     onBackClick = { navController.popBackStack() },
-                    onPostSuccess = {
-                        navController.navigate(Screen.PostFeed.route) {
-                            popUpTo(Screen.PostFeed.route) { inclusive = true }
-                        }
-                    }
+                    onPostSuccess = { navController.navigate(Screen.PostFeed.route) { popUpTo(Screen.PostFeed.route) { inclusive = true } } }
                 )
             }
-
-            // Tab 4: 动态广场
             composable(Screen.PostFeed.route) {
                 PostFeedScreen(
-                    onPostClick = { /* TODO */ },
-                    onCreatePostClick = { navController.navigate(Screen.CreatePost.route) }
+                    onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) },
+                    onCreatePostClick = { navController.navigate(Screen.CreatePost.route) },
+                    onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) }
+                )
+            }
+            composable(Screen.Profile.route) {
+                ProfileScreen(
+                    onSettingsClick = { navController.navigate(Screen.Settings.route) },
+                    onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) },
+                    onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) }
                 )
             }
 
-            // Tab 5: 我的
-            composable(Screen.Profile.route) { ProfileScreen() }
-
-            // --- 详情页 ---
-            composable(Screen.CreatePersona.route) {
-                CreatePersonaScreen(onBack = { navController.popBackStack() })
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onLogout = {
+                        navController.navigate(Screen.Login.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    },
+                    onEditProfileClick = { navController.navigate(Screen.EditProfile.route) } // ✅ 需要更新 SettingsScreen 回调
+                )
             }
 
-            composable(
-                route = Screen.Chat.route,
-                arguments = listOf(navArgument("personaId") { type = NavType.LongType })
-            ) { backStackEntry ->
-                val id = backStackEntry.arguments?.getLong("personaId") ?: 0L
-                ChatScreen(personaId = id, onBack = { navController.popBackStack() })
+            // ✅ [New] 编辑资料路由
+            composable(Screen.EditProfile.route) {
+                EditProfileScreen(onBack = { navController.popBackStack() })
+            }
+
+            // ... (CreatePersona, Chat, PostDetail, PersonaDetail 保持不变) ...
+            composable(route = Screen.CreatePersona.route, arguments = listOf(navArgument("editId") { type = NavType.LongType; defaultValue = -1L })) {
+                CreatePersonaScreen(onBack = { navController.popBackStack() })
+            }
+            composable(route = Screen.Chat.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType })) {
+                val id = it.arguments?.getLong("personaId") ?: 0L
+                ChatScreen(personaId = id, onBack = { navController.popBackStack() }, onPersonaDetailClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) })
+            }
+            composable(route = Screen.PostDetail.route, arguments = listOf(navArgument("postId") { type = NavType.LongType })) {
+                val id = it.arguments?.getLong("postId") ?: 0L
+                PostDetailScreen(postId = id, onBack = { navController.popBackStack() }, onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) })
+            }
+            composable(route = Screen.PersonaDetail.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType })) {
+                val id = it.arguments?.getLong("personaId") ?: 0L
+                PersonaDetailScreen(
+                    personaId = id,
+                    onBackClick = { navController.popBackStack() },
+                    onChatClick = { pid -> navController.navigate(Screen.Chat.createRoute(pid)) },
+                    onCreatePostClick = { pid -> navController.navigate(Screen.CreatePost.createRoute(pid)) },
+                    onEditClick = { pid -> navController.navigate(Screen.CreatePersona.createRoute(editId = pid)) }
+                )
             }
         }
     }

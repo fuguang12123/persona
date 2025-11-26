@@ -1,73 +1,160 @@
 package com.example.persona.data.repository
 
-import android.util.Log
 import com.example.persona.data.local.UserPreferencesRepository
-import com.example.persona.data.local.dao.PostDao
-import com.example.persona.data.local.entity.PostEntity
+import com.example.persona.data.model.PostInteractEvent
+import com.example.persona.data.remote.CommentDto
+import com.example.persona.data.remote.CommentRequest
+import com.example.persona.data.remote.MagicEditRequest
+import com.example.persona.data.remote.NotificationDto
+import com.example.persona.data.remote.PostDetailDto
 import com.example.persona.data.remote.PostDto
 import com.example.persona.data.remote.PostService
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class PostRepository @Inject constructor(
-    private val postDao: PostDao,
     private val postService: PostService,
     private val userPrefs: UserPreferencesRepository
 ) {
 
-    fun getFeedStream(): Flow<List<PostEntity>> = flow {
-        val userId = getCurrentUserId()
-        if (userId == null) {
-            emit(emptyList())
-            return@flow
-        }
-        postDao.getPostsStream(userId).collect { posts ->
-            emit(posts)
-        }
+    private val _postInteractEvents = MutableSharedFlow<PostInteractEvent>()
+    val postInteractEvents: SharedFlow<PostInteractEvent> = _postInteractEvents.asSharedFlow()
+
+    private suspend fun getUserIdLong(): Long {
+        return userPrefs.userId.first()?.toLongOrNull() ?: 0L
     }
 
-    suspend fun refreshFeed(page: Int = 1) {
-        val userId = getCurrentUserId() ?: return
-        try {
-            val response = postService.getFeedPosts(page = page, size = 20)
+    suspend fun getFeedPosts(page: Int = 1): Result<List<PostDto>> {
+        return try {
+            val userId = getUserIdLong()
+            val response = postService.getFeedPosts(userId = userId, page = page)
             if (response.code == 200 && response.data != null) {
-                val remotePosts = response.data
-                val entities = remotePosts.map { it.toEntity(ownerUserId = userId) }
-                postDao.insertAll(entities)
-                Log.d("PostRepo", "Synced ${entities.size} posts from server")
+                Result.success(response.data)
             } else {
-                throw Exception(response.message)
+                Result.failure(Exception(response.message))
             }
         } catch (e: Exception) {
-            Log.e("PostRepo", "Network error during refresh", e)
-            throw e
+            Result.failure(e)
         }
     }
 
-    // ✅ [New] 保存单条远程数据到本地 (用于发布成功后的立即刷新)
-    suspend fun saveRemotePost(postDto: PostDto) {
-        val userId = getCurrentUserId() ?: return
-        val entity = postDto.toEntity(ownerUserId = userId)
-        // 插入到 Room，PostFeedScreen 的 Flow 会自动感应并刷新 UI
-        postDao.insertAll(listOf(entity))
-        Log.d("PostRepo", "Saved new post ${postDto.id} to local DB")
+    suspend fun getNotifications(): Result<List<NotificationDto>> {
+        return try {
+            val userId = getUserIdLong()
+            val response = postService.getNotifications(userId = userId)
+            if (response.code == 200 && response.data != null) {
+                Result.success(response.data)
+            } else {
+                Result.failure(Exception(response.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
-    suspend fun toggleLike(post: PostEntity) {
-        val newLikedState = !post.isLiked
-        val newCount = if (newLikedState) post.likeCount + 1 else post.likeCount - 1
-        postDao.updateLikeStatus(post.id, newLikedState, newCount)
+    // [New] 获取未读数量
+    suspend fun getUnreadCount(): Long {
+        return try {
+            val userId = getUserIdLong()
+            val response = postService.getUnreadCount(userId = userId)
+            if (response.code == 200) response.data ?: 0L else 0L
+        } catch (e: Exception) {
+            0L
+        }
     }
 
-    suspend fun updateBookmarkStatus(postId: Long, isBookmarked: Boolean) {
-        postDao.updateBookmarkStatus(postId, isBookmarked)
+    // [New] 标记为已读
+    suspend fun markNotificationsAsRead() {
+        try {
+            val userId = getUserIdLong()
+            postService.markNotificationsAsRead(userId = userId)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
-    private suspend fun getCurrentUserId(): String? {
-        return userPrefs.userId.first()
+    suspend fun getPostDetail(postId: Long): Result<PostDetailDto> {
+        return try {
+            val userId = getUserIdLong()
+            val response = postService.getPostDetail(userId = userId, id = postId)
+            if (response.code == 200 && response.data != null) {
+                Result.success(response.data)
+            } else {
+                Result.failure(Exception(response.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun toggleLike(postId: Long, currentLiked: Boolean, currentCount: Int): Result<String> {
+        return try {
+            val userId = getUserIdLong()
+            val response = postService.toggleLike(userId = userId, id = postId)
+            if (response.code == 200) {
+                val newLiked = !currentLiked
+                val newCount = if (newLiked) currentCount + 1 else currentCount - 1
+                _postInteractEvents.emit(
+                    PostInteractEvent(postId = postId, isLiked = newLiked, likesCount = newCount)
+                )
+                Result.success(response.data ?: "Success")
+            } else {
+                Result.failure(Exception(response.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun toggleBookmark(postId: Long, currentBookmarked: Boolean): Result<String> {
+        return try {
+            val userId = getUserIdLong()
+            val response = postService.toggleBookmark(userId = userId, id = postId)
+            if (response.code == 200) {
+                val newBookmarked = !currentBookmarked
+                _postInteractEvents.emit(
+                    PostInteractEvent(postId = postId, isBookmarked = newBookmarked)
+                )
+                Result.success(response.data ?: "Success")
+            } else {
+                Result.failure(Exception(response.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun addComment(postId: Long, content: String, parentId: Long?): Result<CommentDto> {
+        return try {
+            val request = CommentRequest(content = content, parentId = parentId)
+            val userId = getUserIdLong()
+            val response = postService.addComment(userId = userId, id = postId, request = request)
+            if (response.code == 200 && response.data != null) {
+                Result.success(response.data)
+            } else {
+                Result.failure(Exception(response.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun magicEdit(content: String, personaName: String?, description: String?, tags: String?): Result<String> {
+        return try {
+            val request = MagicEditRequest(content, personaName, description, tags)
+            val response = postService.magicEdit(request)
+            if (response.code == 200 && response.data != null) {
+                Result.success(response.data)
+            } else {
+                Result.failure(Exception(response.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

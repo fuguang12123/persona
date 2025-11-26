@@ -8,28 +8,27 @@ import com.google.gson.annotations.SerializedName
 data class Persona(
     val id: Long = 0,
 
-    // 后端返回的是 user_id，转为驼峰
-    @SerializedName("user_id")
+    // [Fix] 添加 alternate 兼容后端返回的 "userId" (驼峰)
+    @SerializedName("user_id", alternate = ["userId"])
     val userId: Long? = null,
 
     val name: String = "",
 
-    // 后端返回的是 avatar_url
-    @SerializedName("avatar_url")
+    // [Fix] 添加 alternate 兼容 "avatarUrl"
+    @SerializedName("avatar_url", alternate = ["avatarUrl"])
     val avatarUrl: String? = null,
 
     val description: String? = null,
 
-    // 后端返回的是 personality_tags
-    @SerializedName("personality_tags")
+    // [Fix] 添加 alternate 兼容 "personalityTags"
+    @SerializedName("personality_tags", alternate = ["personalityTags"])
     val personalityTags: String? = null,
 
-    // 系统提示词 (创建时用到，广场列表可能不返回)
-    @SerializedName("prompt_template")
+    // [Fix] 添加 alternate 兼容 "promptTemplate"
+    @SerializedName("prompt_template", alternate = ["promptTemplate"])
     val promptTemplate: String? = null,
 
-    // 后端返回的是 is_public (0/1 或 boolean)
-    @SerializedName("is_public")
+    // [Fix] 添加 alternate 兼容 "isPublic"
+    @SerializedName("is_public", alternate = ["isPublic"])
     val isPublic: Boolean? = true
 )
-

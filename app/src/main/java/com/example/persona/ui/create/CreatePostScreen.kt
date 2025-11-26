@@ -1,11 +1,18 @@
 package com.example.persona.ui.create
 
 import android.net.Uri
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,18 +26,22 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -61,26 +73,27 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreatePostScreen(
     viewModel: CreatePostViewModel = hiltViewModel(),
-    personaId: Long = 1L,
     onBackClick: () -> Unit,
     onPostSuccess: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
-    // [New] 控制大图预览 Dialog 的状态
-    var showFullImage by remember { mutableStateOf(false) }
+    var previewImageUrl by remember { mutableStateOf<String?>(null) }
+    var isSearchVisible by remember { mutableStateOf(false) }
 
-    // 相册选择器
     val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.uploadLocalImage(it) }
+        contract = ActivityResultContracts.PickMultipleVisualMedia(9)
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.uploadLocalImages(uris)
+        }
     }
 
     LaunchedEffect(uiState.isSuccess) {
@@ -96,35 +109,25 @@ fun CreatePostScreen(
         }
     }
 
-    // [New] 大图预览 Dialog
-    if (showFullImage && uiState.imageUrl != null) {
+    // 图片全屏预览 Dialog
+    if (previewImageUrl != null) {
         Dialog(
-            onDismissRequest = { showFullImage = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false) // 全屏
+            onDismissRequest = { previewImageUrl = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
-                    .clickable { showFullImage = false }, // 点击任意处关闭
+                    .clickable { previewImageUrl = null },
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
-                    model = uiState.imageUrl,
+                    model = previewImageUrl,
                     contentDescription = "Full Image",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxWidth()
                 )
-                // 关闭按钮
-                IconButton(
-                    onClick = { showFullImage = false },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), MaterialTheme.shapes.small)
-                ) {
-                    Icon(Icons.Default.Close, "Close", tint = Color.White)
-                }
             }
         }
     }
@@ -140,8 +143,10 @@ fun CreatePostScreen(
                 },
                 actions = {
                     Button(
-                        onClick = { viewModel.createPost(personaId) },
-                        enabled = !uiState.isLoading && uiState.content.isNotBlank(),
+                        onClick = { viewModel.createPost() },
+                        enabled = !uiState.isLoading &&
+                                (uiState.content.isNotBlank() || uiState.imageUrls.isNotEmpty()) &&
+                                uiState.selectedPersonaId != null,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
                         if (uiState.isLoading) {
@@ -156,116 +161,273 @@ fun CreatePostScreen(
             )
         }
     ) { padding ->
-        // [New] 使用 verticalScroll 让内容自然滚动，解决图片被挤到底部的问题
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState()) // 关键：可滚动
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            // 1. 文本框
-            OutlinedTextField(
-                value = uiState.content,
-                onValueChange = viewModel::onContentChange,
-                placeholder = { Text("此刻的想法... (支持AI配图或本地上传)") },
-                // [New] 移除 weight(1f)，设置最小高度，使其随内容或固定高度
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 150.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
-                ),
-                textStyle = MaterialTheme.typography.bodyLarge
-            )
+            // --- 顶部：身份选择区域 ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "发布身份",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.Gray
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                IconButton(
+                    onClick = {
+                        isSearchVisible = !isSearchVisible
+                        if (!isSearchVisible) viewModel.onSearchQueryChange("")
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSearchVisible) Icons.Default.Close else Icons.Default.Search,
+                        contentDescription = "Search Persona",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
 
-            // 2. 图片预览区 (紧跟文字下方)
-            if (uiState.imageUrl != null) {
+            AnimatedVisibility(
+                visible = isSearchVisible,
+                enter = expandHorizontally() + fadeIn(),
+                exit = shrinkHorizontally() + fadeOut()
+            ) {
+                OutlinedTextField(
+                    value = uiState.searchQuery,
+                    onValueChange = { viewModel.onSearchQueryChange(it) },
+                    placeholder = { Text("搜索智能体名称...") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .height(56.dp),
+                    singleLine = true,
+                    shape = RoundedCornerShape(8.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (uiState.personas.isNotEmpty()) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp), // 间距稍微加大
+                    modifier = Modifier.fillMaxWidth().height(100.dp) // 高度稍微给够
+                ) {
+                    items(uiState.personas) { persona ->
+                        val isSelected = persona.id == uiState.selectedPersonaId
+
+                        // 1. 处理头像 URL 逻辑：不为空显示图片(处理svg)，为空显示DiceBear生成的
+                        val displayAvatarUrl = remember(persona.avatar, persona.name) {
+                            if (!persona.avatar.isNullOrBlank()) {
+                                if (persona.avatar.contains(".svg")) {
+                                    persona.avatar.replace("/svg", "/png")
+                                } else {
+                                    if (persona.name == "月光") {
+                                        Log.d("AvatarDebug", "月光原本的头像URL: ${persona.avatar}")
+                                    }
+                                    persona.avatar
+                                }
+                            } else {
+                                if (persona.name == "月光") {
+                                    Log.d("AvatarDebug", "月光没有头像，使用 DiceBear")
+                                }
+                                // 备选：根据名字生成头像，保证列表不全是灰色人头
+                                "https://api.dicebear.com/7.x/avataaars/png?seed=${persona.name}"
+                            }
+                        }
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .width(64.dp)
+                                .clickable { viewModel.selectPersona(persona.id) }
+                        ) {
+                            // 头像容器
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(CircleShape)
+                                    // 选中时显示 Primary 颜色的边框
+                                    .border(
+                                        width = if (isSelected) 2.dp else 0.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                        shape = CircleShape
+                                    )
+                                    .background(Color.LightGray.copy(alpha = 0.3f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(displayAvatarUrl)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = persona.name,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop,
+                                    // 加载中和错误时显示的图标
+                                    placeholder = rememberVectorPainter(Icons.Default.Person),
+                                    error = rememberVectorPainter(Icons.Default.Person)
+                                )
+
+                                // 选中时的对勾遮罩 (可选，增加选中辨识度)
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color.Black.copy(alpha = 0.3f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = persona.name,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black
+                            )
+                        }
+                    }
+                }
+            } else {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .wrapContentHeight() // 高度自适应
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.LightGray)
-                        .clickable { showFullImage = true } // [New] 点击查看大图
+                        .height(80.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = uiState.imageUrl,
-                        contentDescription = "Image",
-                        contentScale = ContentScale.FillWidth, // 宽度填满，高度自适应
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Text("没有找到匹配的智能体", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                }
+            }
 
-                    // 标签和删除按钮容器
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.BottomCenter)
-                            .padding(8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 来源标签
-                        AssistChip(
-                            onClick = {},
-                            label = { Text(if (uiState.isAiGenerated) "AI 生成" else "本地上传") },
-                            colors = AssistChipDefaults.assistChipColors(containerColor = Color.White.copy(alpha = 0.9f))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // --- 2. 文本输入框 ---
+            Box {
+                OutlinedTextField(
+                    value = uiState.content,
+                    onValueChange = viewModel::onContentChange,
+                    placeholder = { Text("此刻的想法... (写完点✨润色试试)") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent
+                    ),
+                    textStyle = MaterialTheme.typography.bodyLarge
+                )
+
+                // 润色按钮
+                IconButton(
+                    onClick = { viewModel.magicEdit() },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp),
+                    enabled = !uiState.isMagicEditing && uiState.content.isNotBlank()
+                ) {
+                    if (uiState.isMagicEditing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            Icons.Default.AutoFixHigh,
+                            contentDescription = "Magic Edit",
+                            tint = MaterialTheme.colorScheme.primary
                         )
+                    }
+                }
+            }
 
-                        // 删除按钮
-                        IconButton(
-                            onClick = { viewModel.removeImage() },
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // --- 3. 图片预览列表 ---
+            if (uiState.imageUrls.isNotEmpty()) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().height(120.dp)
+                ) {
+                    itemsIndexed(uiState.imageUrls) { index, url ->
+                        Box(
                             modifier = Modifier
-                                .background(Color.Black.copy(alpha = 0.5f), MaterialTheme.shapes.small)
+                                .size(120.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.LightGray)
+                                .clickable { previewImageUrl = url }
                         ) {
-                            Icon(Icons.Default.Close, "Remove", tint = Color.White)
+                            AsyncImage(
+                                model = url,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            IconButton(
+                                onClick = { viewModel.removeImage(index) },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                                    .size(24.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            ) {
+                                Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }
             }
 
-            // 留出底部按钮的空间，或者直接把按钮放在这里
             Spacer(modifier = Modifier.height(24.dp))
 
-            // 3. 底部工具栏 (紧跟内容)
+            // --- 4. 底部按钮区 (AI配图 / 相册) ---
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // AI 配图
                 SuggestionChip(
                     onClick = { viewModel.generateAiImage() },
                     label = { Text("AI 配图") },
                     icon = { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary) },
-                    enabled = !uiState.isLoading,
+                    enabled = !uiState.isLoading && uiState.imageUrls.size < 9,
                     modifier = Modifier.height(48.dp)
                 )
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // 上传图片
                 SuggestionChip(
                     onClick = {
                         photoPicker.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         )
                     },
-                    label = { Text("相册上传") },
+                    label = { Text("相册 (${uiState.imageUrls.size}/9)") },
                     icon = { Icon(Icons.Default.AddPhotoAlternate, null, tint = MaterialTheme.colorScheme.secondary) },
-                    enabled = !uiState.isLoading,
+                    enabled = !uiState.isLoading && uiState.imageUrls.size < 9,
                     modifier = Modifier.height(48.dp)
                 )
 
-                if (uiState.isLoading && uiState.imageUrl == null) {
+                if (uiState.isLoading) {
                     Spacer(modifier = Modifier.width(12.dp))
                     Text("处理中...", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                 }
             }
 
-            // 底部增加一些额外空白，防止滚动到底部时太贴边
             Spacer(modifier = Modifier.height(50.dp))
         }
     }

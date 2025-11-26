@@ -23,8 +23,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Button
@@ -42,38 +44,36 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
-import com.example.persona.data.local.entity.PostEntity
+import coil.request.ImageRequest
+import com.example.persona.data.remote.PostDto
 
-/**
- * 新的动态广场页面 (PostFeedScreen)
- * 区别于原有的 SocialFeedScreen (Persona 列表)
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostFeedScreen(
     viewModel: PostFeedViewModel = hiltViewModel(),
-    onPostClick: (Long) -> Unit, // 点击卡片跳转详情
-    onCreatePostClick: () -> Unit // [关键] 点击发布按钮回调
+    onPostClick: (Long) -> Unit,
+    onCreatePostClick: () -> Unit,
+    // [New] 智能体头像点击回调
+    onPersonaClick: (Long) -> Unit
 ) {
-    // 订阅 ViewModel 状态
     val feedState by viewModel.feedState.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
 
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("动态广场") })
-        },
+        topBar = { TopAppBar(title = { Text("动态广场") }) },
         floatingActionButton = {
-            // [关键] 悬浮按钮，点击触发 onCreatePostClick
             FloatingActionButton(
                 onClick = onCreatePostClick,
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -87,10 +87,9 @@ fun PostFeedScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(Color(0xFFF5F5F5)) // 浅灰底色
+                .background(Color(0xFFF5F5F5))
         ) {
             if (feedState.isEmpty() && !isRefreshing) {
-                // 空状态
                 Column(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -99,14 +98,11 @@ fun PostFeedScreen(
                     Button(
                         onClick = { viewModel.refresh() },
                         modifier = Modifier.padding(top = 8.dp)
-                    ) {
-                        Text("刷新看看")
-                    }
+                    ) { Text("刷新看看") }
                 }
             } else {
-                // 瀑布流列表
                 LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(2), // 双列
+                    columns = StaggeredGridCells.Fixed(2),
                     contentPadding = PaddingValues(8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalItemSpacing = 8.dp,
@@ -117,20 +113,18 @@ fun PostFeedScreen(
                             post = post,
                             onLikeClick = { viewModel.toggleLike(post) },
                             onBookmarkClick = { viewModel.toggleBookmark(post) },
-                            onClick = { onPostClick(post.id) }
+                            onClick = { onPostClick(post.id) },
+                            // [New] 传递回调
+                            onPersonaClick = onPersonaClick
                         )
                     }
-                    // 底部留白，避免被 FAB 遮挡
                     item { Spacer(modifier = Modifier.height(80.dp)) }
                 }
             }
 
-            // 加载指示器 (简易版)
             if (isRefreshing) {
                 CircularProgressIndicator(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 16.dp)
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
                 )
             }
         }
@@ -139,36 +133,61 @@ fun PostFeedScreen(
 
 @Composable
 fun PostCard(
-    post: PostEntity,
+    post: PostDto,
     onLikeClick: () -> Unit,
     onBookmarkClick: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onPersonaClick: (Long) -> Unit // [New]
 ) {
+    val context = LocalContext.current
+    val rawAvatar = post.authorAvatar
+    val finalAvatarUrl = remember(rawAvatar) {
+        if (rawAvatar.isNullOrBlank()) {
+            "https://api.dicebear.com/7.x/avataaars/png?seed=${post.authorName ?: "unknown"}"
+        } else {
+            rawAvatar.replace("/svg", "/png")
+        }
+    }
+
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
         Column {
-            // 1. 图片区域
-            if (post.imageUrls.isNotEmpty()) {
-                AsyncImage(
-                    model = post.imageUrls.first(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .wrapContentHeight()
-                        .heightIn(max = 280.dp) // 限制最大高度
-                )
+            val images = post.imageUrls
+            if (images.isNotEmpty()) {
+                Box {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(images.first())
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .wrapContentHeight()
+                            .heightIn(max = 280.dp)
+                    )
+                    if (images.size > 1) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Multiple",
+                            tint = Color.White,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                                .size(20.dp)
+                                .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                                .padding(2.dp)
+                        )
+                    }
+                }
             }
 
-            // 2. 内容区域
             Column(modifier = Modifier.padding(10.dp)) {
-                // 正文
                 if (post.content.isNotBlank()) {
                     Text(
                         text = post.content,
@@ -180,21 +199,32 @@ fun PostCard(
                     )
                 }
 
-                // 作者信息栏
+                // [Fix] 作者栏可点击，跳转到智能体详情
                 Row(
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable {
+                        // 解析 PersonaId (String -> Long)
+                        val pid = post.personaId.toLongOrNull() ?: 0L
+                        if (pid > 0) onPersonaClick(pid)
+                    }
                 ) {
                     AsyncImage(
-                        model = post.authorAvatar,
+                        model = ImageRequest.Builder(context)
+                            .data(finalAvatarUrl)
+                            .crossfade(true)
+                            .build(),
                         contentDescription = null,
                         modifier = Modifier
                             .size(20.dp)
                             .clip(CircleShape)
-                            .background(Color.LightGray)
+                            .background(Color.LightGray),
+                        contentScale = ContentScale.Crop,
+                        placeholder = rememberVectorPainter(Icons.Default.Person),
+                        error = rememberVectorPainter(Icons.Default.Person)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = post.authorName,
+                        text = post.authorName ?: "Unknown",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray,
                         maxLines = 1,
@@ -205,13 +235,11 @@ fun PostCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // 底部操作栏 (点赞 & 收藏)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 点赞
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable(onClick = onLikeClick)
@@ -224,13 +252,12 @@ fun PostCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (post.likeCount > 0) "${post.likeCount}" else "赞",
+                            text = if (post.likes > 0) "${post.likes}" else "赞",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
                     }
 
-                    // 收藏 (星形图标)
                     IconButton(
                         onClick = onBookmarkClick,
                         modifier = Modifier.size(24.dp)
@@ -238,7 +265,7 @@ fun PostCard(
                         Icon(
                             imageVector = if (post.isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
                             contentDescription = "Bookmark",
-                            tint = if (post.isBookmarked) Color(0xFFFFC107) else Color.Gray // 亮黄色或灰色
+                            tint = if (post.isBookmarked) Color(0xFFFFC107) else Color.Gray
                         )
                     }
                 }

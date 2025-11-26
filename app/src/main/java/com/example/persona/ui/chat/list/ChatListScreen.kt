@@ -2,34 +2,72 @@ package com.example.persona.ui.chat.list
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.persona.data.local.dao.ConversationView
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListScreen(
     viewModel: ChatListViewModel = hiltViewModel(),
-    onChatClick: (Long) -> Unit
+    onChatClick: (Long) -> Unit,
+    onNotificationClick: () -> Unit
 ) {
     val conversations by viewModel.conversations.collectAsState()
+    val unreadCount by viewModel.unreadCount.collectAsState()
+
+    // [New] 每次进入该页面时，刷新未读数
+    // 这样当你从通知页(已读)返回时，红点会立刻消失
+    LaunchedEffect(Unit) {
+        viewModel.refreshUnreadCount()
+    }
 
     Scaffold(
         topBar = {
@@ -39,6 +77,31 @@ fun ChatListScreen(
                         "消息 (${conversations.size})",
                         fontWeight = FontWeight.Bold
                     )
+                },
+                actions = {
+                    IconButton(onClick = onNotificationClick) {
+                        // [New] 带红点的图标
+                        if (unreadCount > 0) {
+                            BadgedBox(
+                                badge = {
+                                    Badge {
+                                        // 如果数字太大显示 99+
+                                        Text(if (unreadCount > 99) "99+" else unreadCount.toString())
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Notifications,
+                                    contentDescription = "Notifications"
+                                )
+                            }
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "Notifications"
+                            )
+                        }
+                    }
                 }
             )
         }
@@ -71,11 +134,20 @@ fun ChatListScreen(
     }
 }
 
+// ... ConversationItem 保持不变 ...
 @Composable
 fun ConversationItem(
     item: ConversationView,
     onClick: () -> Unit
 ) {
+    val finalAvatarUrl = remember(item.avatarUrl, item.name) {
+        if (item.avatarUrl.isNullOrBlank()) {
+            "https://api.dicebear.com/7.x/avataaars/png?seed=${item.name}"
+        } else {
+            item.avatarUrl.replace("/svg", "/png")
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -83,19 +155,23 @@ fun ConversationItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 头像
         AsyncImage(
-            model = item.avatarUrl,
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(finalAvatarUrl)
+                .crossfade(true)
+                .build(),
             contentDescription = null,
             modifier = Modifier
                 .size(50.dp)
                 .clip(CircleShape)
-                .background(Color.LightGray)
+                .background(Color.LightGray),
+            contentScale = ContentScale.Crop,
+            placeholder = rememberVectorPainter(Icons.Default.Person),
+            error = rememberVectorPainter(Icons.Default.Person)
         )
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // 内容区
         Column(
             modifier = Modifier.weight(1f)
         ) {
@@ -108,7 +184,6 @@ fun ConversationItem(
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold
                 )
-                // 使用新的解析函数处理 String 类型的时间
                 Text(
                     text = parseAndFormatTime(item.timestamp),
                     style = MaterialTheme.typography.labelSmall,
@@ -119,7 +194,7 @@ fun ConversationItem(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = item.lastMessage,
+                text = item.lastMessage ?: "暂无消息",
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.Gray,
                 maxLines = 1,
@@ -129,29 +204,20 @@ fun ConversationItem(
     }
 }
 
-/**
- * 解析数据库中的时间字符串并格式化
- * 输入示例: "2025-11-19 12:46:49"
- */
 fun parseAndFormatTime(timeStr: String?): String {
     if (timeStr.isNullOrEmpty()) return ""
 
     try {
-        // 1. 解析 SQL 日期格式
-        // 注意：这里假设数据库存的是本地时间，如果是 UTC 需要设置 timeZone
         val parser = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         val date = parser.parse(timeStr) ?: return ""
         val timestamp = date.time
-
-        // 2. 使用之前的逻辑格式化为 "HH:mm" 或 "昨天"
         return formatTimeFromMillis(timestamp)
     } catch (e: Exception) {
         e.printStackTrace()
-        return timeStr // 解析失败则直接显示原字符串
+        return timeStr
     }
 }
 
-// 毫秒级时间戳格式化逻辑 (复用之前的)
 fun formatTimeFromMillis(timestamp: Long): String {
     val now = System.currentTimeMillis()
     val date = Date(timestamp)
@@ -167,19 +233,15 @@ fun formatTimeFromMillis(timestamp: Long): String {
     val nowYear = nowCalendar.get(Calendar.YEAR)
 
     return when {
-        // 当天：显示 HH:mm
         diff < 24 * 60 * 60 * 1000 && dayOfMonth == nowDay -> {
             SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
         }
-        // 昨天
         diff < 48 * 60 * 60 * 1000 -> {
             "昨天"
         }
-        // 今年其他时间
         year == nowYear -> {
             SimpleDateFormat("MM-dd", Locale.getDefault()).format(date)
         }
-        // 往年
         else -> {
             SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(date)
         }

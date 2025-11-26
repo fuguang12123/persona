@@ -1,6 +1,5 @@
 package com.example.persona.data.repository
 
-import android.util.Log
 import com.example.persona.data.local.dao.PersonaDao
 import com.example.persona.data.local.entity.PersonaEntity
 import com.example.persona.data.model.Persona
@@ -16,32 +15,24 @@ class PersonaRepository @Inject constructor(
     private val api: PersonaService
 ) {
 
-    // 1. 核心流：SSOT 模式
-    // 数据库一变，这个 Flow 就会发射最新的 UI 数据列表
     fun getFeedStream(): Flow<List<Persona>> {
         return personaDao.getAllPersonas().map { entities ->
             entities.map { it.toDomainModel() }
         }
     }
 
-    // 2. 刷新逻辑：静默更新
-    // 网络请求 -> 拿到数据 -> 存入数据库 -> 触发上面的 Flow 更新
     suspend fun refreshFeed() {
         try {
             val response = api.getFeed()
             if (response.isSuccess() && response.data != null) {
                 val entities = response.data.map { it.toEntity() }
                 personaDao.insertAll(entities)
-            } else {
-                Log.e("PersonaRepo", "Refresh error: ${response.message}")
             }
         } catch (e: Exception) {
-            Log.e("PersonaRepo", "Refresh failed: ${e.message}")
-            // 失败了也不要紧，UI 继续显示数据库里的旧缓存
+            e.printStackTrace()
         }
     }
 
-    // 3. 获取单个详情 (顺便更新缓存)
     suspend fun getPersona(id: Long): Persona? {
         try {
             val response = api.getPersona(id)
@@ -52,10 +43,10 @@ class PersonaRepository @Inject constructor(
         } catch (e: Exception) {
             e.printStackTrace()
         }
+        // 如果网络失败，尝试从数据库读取缓存（可选优化，暂不实现）
         return null
     }
 
-    // 4. 创建分身 (透传)
     suspend fun createPersona(persona: Persona): Boolean {
         return try {
             val response = api.createPersona(persona)
@@ -65,22 +56,38 @@ class PersonaRepository @Inject constructor(
         }
     }
 
-    // 5. AI 生成 (透传)
+    // [New] 更新智能体
+    suspend fun updatePersona(id: Long, persona: Persona): Boolean {
+        return try {
+            val response = api.updatePersona(id, persona)
+            if (response.isSuccess()) {
+                // 更新成功后，同步更新本地数据库缓存，让 UI 即时刷新
+                val updatedEntity = persona.copy(id = id).toEntity()
+                personaDao.insertAll(listOf(updatedEntity))
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
     suspend fun generateDescription(name: String): String {
         return try {
             val req = com.example.persona.data.remote.AiGenRequest(name)
             val response = api.generatePersonaDescription(req)
             if (response.isSuccess()) response.data ?: "" else ""
         } catch (e: Exception) {
-            "AI 生成失败，请重试"
+            ""
         }
     }
 
-    // --- Mappers ---
     private fun Persona.toEntity() = PersonaEntity(
         id = this.id,
         userId = this.userId ?: 0L,
-        name = this.name ?: "Unknown",
+        name = this.name,
         avatarUrl = this.avatarUrl,
         description = this.description,
         personalityTags = this.personalityTags,
