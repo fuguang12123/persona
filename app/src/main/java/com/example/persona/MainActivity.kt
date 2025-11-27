@@ -5,6 +5,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircleOutline
@@ -12,6 +14,7 @@ import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.DynamicFeed
 import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -21,7 +24,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -64,7 +69,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector?
     object PostFeed : Screen("post_feed", "动态", Icons.Default.DynamicFeed)
     object Profile : Screen("profile", "我的", Icons.Default.PersonOutline)
     object Settings : Screen("settings", "设置")
-    object EditProfile : Screen("edit_profile", "编辑资料") // ✅ [New]
+    object EditProfile : Screen("edit_profile", "编辑资料")
     object CreatePersona : Screen("create_persona?editId={editId}", "创建智能体") {
         fun createRoute(editId: Long? = null) = if (editId != null) "create_persona?editId=$editId" else "create_persona"
     }
@@ -86,28 +91,28 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var sessionManager: SessionManager
 
-    // 注入 MainViewModel 以处理启动逻辑
     private val mainViewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // ✅ [New] App 启动时检查 Token 自动登录/续期
-        mainViewModel.checkAndRefreshToken()
-
         setContent {
             PersonaTheme {
-                MainAppScreen(sessionManager)
+                // 传入 mainViewModel 以获取 startDestination
+                MainAppScreen(sessionManager, mainViewModel)
             }
         }
     }
 }
 
 @Composable
-fun MainAppScreen(sessionManager: SessionManager) {
+fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) {
     val navController = rememberNavController()
     val context = LocalContext.current
 
+    // ✅ [New] 监听初始路由状态
+    val startDestination by mainViewModel.startDestination.collectAsState()
+
+    // 监听踢下线事件
     LaunchedEffect(Unit) {
         sessionManager.logoutEvent.collect {
             Toast.makeText(context, "登录已过期，请重新登录", Toast.LENGTH_SHORT).show()
@@ -117,140 +122,145 @@ fun MainAppScreen(sessionManager: SessionManager) {
         }
     }
 
-    val bottomNavItems = listOf(Screen.ChatList, Screen.SocialFeed, Screen.CreatePost, Screen.PostFeed, Screen.Profile)
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry?.destination
-    val currentRoute = currentDestination?.route
+    // ✅ [New] 在决定好去哪之前，显示 Loading 页 (防止闪屏)
+    if (startDestination == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    } else {
+        // startDestination 确定后，渲染主界面
+        val bottomNavItems = listOf(Screen.ChatList, Screen.SocialFeed, Screen.CreatePost, Screen.PostFeed, Screen.Profile)
+        val navBackStackEntry by navController.currentBackStackEntryAsState()
+        val currentDestination = navBackStackEntry?.destination
+        val currentRoute = currentDestination?.route
 
-    val showBottomBar = currentRoute in listOf(
-        Screen.ChatList.route, Screen.SocialFeed.route, Screen.CreatePost.route, Screen.PostFeed.route, Screen.Profile.route
-    ) || currentRoute?.startsWith("create_post") == true
+        val showBottomBar = currentRoute in listOf(
+            Screen.ChatList.route, Screen.SocialFeed.route, Screen.CreatePost.route, Screen.PostFeed.route, Screen.Profile.route
+        ) || currentRoute?.startsWith("create_post") == true
 
-    Scaffold(
-        bottomBar = {
-            if (showBottomBar) {
-                NavigationBar {
-                    bottomNavItems.forEach { screen ->
-                        val isSelected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
-                        NavigationBarItem(
-                            icon = { Icon(screen.icon!!, contentDescription = screen.title) },
-                            label = { Text(screen.title) },
-                            selected = isSelected,
-                            onClick = {
-                                navController.navigate(screen.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = if (screen == Screen.CreatePost) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer
+        Scaffold(
+            bottomBar = {
+                if (showBottomBar) {
+                    NavigationBar {
+                        bottomNavItems.forEach { screen ->
+                            val isSelected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                            NavigationBarItem(
+                                icon = { Icon(screen.icon!!, contentDescription = screen.title) },
+                                label = { Text(screen.title) },
+                                selected = isSelected,
+                                onClick = {
+                                    navController.navigate(screen.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = if (screen == Screen.CreatePost) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
-        }
-    ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Login.route,
-            modifier = Modifier.padding(innerPadding)
-        ) {
-            // ... (Login, Register, ChatList 等保持不变) ...
-            composable(Screen.Login.route) {
-                LoginScreen(
-                    onLoginSuccess = {
-                        navController.navigate(Screen.ChatList.route) { popUpTo(Screen.Login.route) { inclusive = true } }
-                    },
-                    onRegisterClick = { navController.navigate(Screen.Register.route) }
-                )
-            }
-            composable(Screen.Register.route) {
-                RegisterScreen(
-                    onBackClick = { navController.popBackStack() },
-                    onRegisterSuccess = {
-                        navController.navigate(Screen.ChatList.route) { popUpTo(Screen.Login.route) { inclusive = true } }
-                    }
-                )
-            }
-            composable(Screen.ChatList.route) {
-                ChatListScreen(
-                    onChatClick = { pid -> navController.navigate(Screen.Chat.createRoute(pid)) },
-                    onNotificationClick = { navController.navigate(Screen.Notification.route) }
-                )
-            }
-            composable(Screen.Notification.route) {
-                NotificationScreen(
-                    onBackClick = { navController.popBackStack() },
-                    onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) }
-                )
-            }
-            composable(Screen.SocialFeed.route) {
-                SocialFeedScreen(
-                    onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) },
-                    onCreateClick = { navController.navigate(Screen.CreatePersona.createRoute()) }
-                )
-            }
-            composable(route = Screen.CreatePost.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType; defaultValue = -1L })) {
-                CreatePostScreen(
-                    onBackClick = { navController.popBackStack() },
-                    onPostSuccess = { navController.navigate(Screen.PostFeed.route) { popUpTo(Screen.PostFeed.route) { inclusive = true } } }
-                )
-            }
-            composable(Screen.PostFeed.route) {
-                PostFeedScreen(
-                    onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) },
-                    onCreatePostClick = { navController.navigate(Screen.CreatePost.route) },
-                    onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) }
-                )
-            }
-            composable(Screen.Profile.route) {
-                ProfileScreen(
-                    onSettingsClick = { navController.navigate(Screen.Settings.route) },
-                    onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) },
-                    onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) }
-                )
-            }
-
-            composable(Screen.Settings.route) {
-                SettingsScreen(
-                    onBack = { navController.popBackStack() },
-                    onLogout = {
-                        navController.navigate(Screen.Login.route) {
-                            popUpTo(0) { inclusive = true }
+        ) { innerPadding ->
+            NavHost(
+                navController = navController,
+                startDestination = startDestination!!, // ✅ [New] 使用动态计算的起始页
+                modifier = Modifier.padding(innerPadding)
+            ) {
+                composable(Screen.Login.route) {
+                    LoginScreen(
+                        onLoginSuccess = {
+                            navController.navigate(Screen.ChatList.route) { popUpTo(Screen.Login.route) { inclusive = true } }
+                        },
+                        onRegisterClick = { navController.navigate(Screen.Register.route) }
+                    )
+                }
+                composable(Screen.Register.route) {
+                    RegisterScreen(
+                        onBackClick = { navController.popBackStack() },
+                        onRegisterSuccess = {
+                            navController.navigate(Screen.ChatList.route) { popUpTo(Screen.Login.route) { inclusive = true } }
                         }
-                    },
-                    onEditProfileClick = { navController.navigate(Screen.EditProfile.route) } // ✅ 需要更新 SettingsScreen 回调
-                )
-            }
+                    )
+                }
+                composable(Screen.ChatList.route) {
+                    ChatListScreen(
+                        onChatClick = { pid -> navController.navigate(Screen.Chat.createRoute(pid)) },
+                        onNotificationClick = { navController.navigate(Screen.Notification.route) }
+                    )
+                }
+                composable(Screen.Notification.route) {
+                    NotificationScreen(
+                        onBackClick = { navController.popBackStack() },
+                        onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) }
+                    )
+                }
+                composable(Screen.SocialFeed.route) {
+                    SocialFeedScreen(
+                        onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) },
+                        onCreateClick = { navController.navigate(Screen.CreatePersona.createRoute()) }
+                    )
+                }
+                composable(route = Screen.CreatePost.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType; defaultValue = -1L })) {
+                    CreatePostScreen(
+                        onBackClick = { navController.popBackStack() },
+                        onPostSuccess = { navController.navigate(Screen.PostFeed.route) { popUpTo(Screen.PostFeed.route) { inclusive = true } } }
+                    )
+                }
+                composable(Screen.PostFeed.route) {
+                    PostFeedScreen(
+                        onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) },
+                        onCreatePostClick = { navController.navigate(Screen.CreatePost.route) },
+                        onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) }
+                    )
+                }
+                composable(Screen.Profile.route) {
+                    ProfileScreen(
+                        onSettingsClick = { navController.navigate(Screen.Settings.route) },
+                        onPostClick = { pid -> navController.navigate(Screen.PostDetail.createRoute(pid)) },
+                        onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) }
+                    )
+                }
 
-            // ✅ [New] 编辑资料路由
-            composable(Screen.EditProfile.route) {
-                EditProfileScreen(onBack = { navController.popBackStack() })
-            }
+                composable(Screen.Settings.route) {
+                    SettingsScreen(
+                        onBack = { navController.popBackStack() },
+                        onLogout = {
+                            navController.navigate(Screen.Login.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        },
+                        onEditProfileClick = { navController.navigate(Screen.EditProfile.route) }
+                    )
+                }
 
-            // ... (CreatePersona, Chat, PostDetail, PersonaDetail 保持不变) ...
-            composable(route = Screen.CreatePersona.route, arguments = listOf(navArgument("editId") { type = NavType.LongType; defaultValue = -1L })) {
-                CreatePersonaScreen(onBack = { navController.popBackStack() })
-            }
-            composable(route = Screen.Chat.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType })) {
-                val id = it.arguments?.getLong("personaId") ?: 0L
-                ChatScreen(personaId = id, onBack = { navController.popBackStack() }, onPersonaDetailClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) })
-            }
-            composable(route = Screen.PostDetail.route, arguments = listOf(navArgument("postId") { type = NavType.LongType })) {
-                val id = it.arguments?.getLong("postId") ?: 0L
-                PostDetailScreen(postId = id, onBack = { navController.popBackStack() }, onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) })
-            }
-            composable(route = Screen.PersonaDetail.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType })) {
-                val id = it.arguments?.getLong("personaId") ?: 0L
-                PersonaDetailScreen(
-                    personaId = id,
-                    onBackClick = { navController.popBackStack() },
-                    onChatClick = { pid -> navController.navigate(Screen.Chat.createRoute(pid)) },
-                    onCreatePostClick = { pid -> navController.navigate(Screen.CreatePost.createRoute(pid)) },
-                    onEditClick = { pid -> navController.navigate(Screen.CreatePersona.createRoute(editId = pid)) }
-                )
+                composable(Screen.EditProfile.route) {
+                    EditProfileScreen(onBack = { navController.popBackStack() })
+                }
+
+                composable(route = Screen.CreatePersona.route, arguments = listOf(navArgument("editId") { type = NavType.LongType; defaultValue = -1L })) {
+                    CreatePersonaScreen(onBack = { navController.popBackStack() })
+                }
+                composable(route = Screen.Chat.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType })) {
+                    val id = it.arguments?.getLong("personaId") ?: 0L
+                    ChatScreen(personaId = id, onBack = { navController.popBackStack() }, onPersonaDetailClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) })
+                }
+                composable(route = Screen.PostDetail.route, arguments = listOf(navArgument("postId") { type = NavType.LongType })) {
+                    val id = it.arguments?.getLong("postId") ?: 0L
+                    PostDetailScreen(postId = id, onBack = { navController.popBackStack() }, onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) })
+                }
+                composable(route = Screen.PersonaDetail.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType })) {
+                    val id = it.arguments?.getLong("personaId") ?: 0L
+                    PersonaDetailScreen(
+                        personaId = id,
+                        onBackClick = { navController.popBackStack() },
+                        onChatClick = { pid -> navController.navigate(Screen.Chat.createRoute(pid)) },
+                        onCreatePostClick = { pid -> navController.navigate(Screen.CreatePost.createRoute(pid)) },
+                        onEditClick = { pid -> navController.navigate(Screen.CreatePersona.createRoute(editId = pid)) }
+                    )
+                }
             }
         }
     }

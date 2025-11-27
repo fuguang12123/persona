@@ -43,17 +43,22 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import com.example.persona.data.remote.PostDto
 
@@ -67,6 +72,20 @@ fun ProfileScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val user = uiState.user
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // 监听生命周期：每次页面可见时（ON_RESUME）自动刷新数据
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.loadProfile()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -102,9 +121,20 @@ fun ProfileScreen(
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 处理 User 头像 (DiceBear SVG -> PNG)
+                    val rawAvatarUrl = user?.avatarUrl ?: ""
+                    val displayAvatarUrl = remember(rawAvatarUrl) {
+                        if (rawAvatarUrl.contains("dicebear.com") && rawAvatarUrl.contains("/svg")) {
+                            rawAvatarUrl.replace("/svg", "/png")
+                        } else {
+                            rawAvatarUrl
+                        }
+                    }
+
                     AsyncImage(
-                        model = user?.avatarUrl ?: "",
+                        model = displayAvatarUrl,
                         contentDescription = "Avatar",
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .size(80.dp)
                             .clip(CircleShape)
@@ -142,7 +172,7 @@ fun ProfileScreen(
                 } else {
                     when (uiState.activeTab) {
                         3 -> {
-                            // 智能体列表 (保持原有的网格布局，看起来更整齐)
+                            // 智能体列表
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(2),
                                 contentPadding = PaddingValues(8.dp),
@@ -150,21 +180,44 @@ fun ProfileScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 items(uiState.myPersonas) { persona ->
+                                    // ✅ [New] 智能体头像处理逻辑
+                                    // 如果头像为空，使用 DiceBear bottts 风格生成 PNG 头像
+                                    val personaAvatar = if (persona.avatarUrl.isNullOrBlank()) {
+                                        "https://api.dicebear.com/7.x//avataaars/png?seed=${persona.name}"
+                                        ///avataaars
+                                    } else {
+                                        persona.avatarUrl
+                                    }
+
                                     Card(
                                         modifier = Modifier.clickable { onPersonaClick(persona.id) },
                                         elevation = CardDefaults.cardElevation(2.dp),
                                         colors = CardDefaults.cardColors(containerColor = Color.White)
                                     ) {
                                         Column(Modifier.padding(8.dp)) {
-                                            AsyncImage(model = persona.avatarUrl, contentDescription = null, modifier = Modifier.size(50.dp).clip(CircleShape))
-                                            Text(persona.name, style = MaterialTheme.typography.titleMedium)
+                                            AsyncImage(
+                                                model = personaAvatar,
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .size(50.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.LightGray), // 添加底色，防止透明图看不清
+                                                contentScale = ContentScale.Crop // 确保填充满
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = persona.name,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
                         else -> {
-                            // 动态/点赞/收藏列表 -> 切换为【三列瀑布流】
+                            // 动态/点赞/收藏列表 -> 三列瀑布流
                             val posts = when(uiState.activeTab) {
                                 0 -> uiState.myPosts
                                 1 -> uiState.myLikes
@@ -172,11 +225,10 @@ fun ProfileScreen(
                                 else -> emptyList()
                             }
 
-                            // 使用 StaggeredGrid 实现瀑布流
                             LazyVerticalStaggeredGrid(
-                                columns = StaggeredGridCells.Fixed(3), // 3列
-                                contentPadding = PaddingValues(4.dp),  // 极小边距
-                                horizontalArrangement = Arrangement.spacedBy(4.dp), // ✅ 修正: 使用 horizontalArrangement 替代 horizontalItemSpacing
+                                columns = StaggeredGridCells.Fixed(3),
+                                contentPadding = PaddingValues(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 verticalItemSpacing = 4.dp,
                                 modifier = Modifier.fillMaxSize()
                             ) {
@@ -194,8 +246,6 @@ fun ProfileScreen(
 
 /**
  * 瀑布流单项卡片
- * - 有图：展示图片 + 底部渐变阴影 + 白色文字
- * - 无图：展示纯文本内容 + 灰色文字
  */
 @Composable
 fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
@@ -205,7 +255,7 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(4.dp), // 小圆角
+        shape = RoundedCornerShape(4.dp),
         elevation = CardDefaults.cardElevation(1.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
@@ -213,7 +263,7 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
             if (hasImage) {
                 // === 样式 A：有图片 ===
                 Box {
-                    // 1. 图片 (宽度填满，高度自适应)
+                    // 1. 图片
                     AsyncImage(
                         model = post.imageUrls[0],
                         contentDescription = null,
@@ -223,7 +273,7 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
                         contentScale = ContentScale.Crop
                     )
 
-                    // 2. 底部黑色渐变遮罩 (为了让白色文字看清)
+                    // 2. 底部黑色渐变遮罩
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -236,7 +286,7 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
                             )
                     )
 
-                    // 3. 点赞数 (左下角，白色)
+                    // 3. 点赞数
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -267,12 +317,12 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
                     Text(
                         text = post.content,
                         style = MaterialTheme.typography.bodySmall,
-                        maxLines = 6, // 最多显示6行文字
+                        maxLines = 6,
                         overflow = TextOverflow.Ellipsis,
                         color = Color.Black
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    // 点赞数 (灰色)
+                    // 点赞数
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Favorite,

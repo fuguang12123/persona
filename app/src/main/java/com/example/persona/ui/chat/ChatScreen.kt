@@ -1,13 +1,16 @@
 package com.example.persona.ui.chat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,7 +23,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -33,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,17 +66,12 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val listState = rememberLazyListState()
+    val playingUrl by viewModel.audioPlayer.currentPlayingUrl.collectAsState()
 
-    LaunchedEffect(personaId) {
-        viewModel.initChat(personaId)
-    }
+    LaunchedEffect(personaId) { viewModel.initChat(personaId) }
 
-    // [New] 优化：自动回滚到最新消息
-    // 监听消息数量变化 (发送或接收新消息时 size 会增加)
-    LaunchedEffect(viewModel.messages.size) {
-        if (viewModel.messages.isNotEmpty()) {
-            // 因为启用了 reverseLayout = true，列表底部是 Index 0
-            // 所以这里滚动到 0 即可实现“回滚到最下方”
+    LaunchedEffect(viewModel.messages.size, viewModel.isSending) {
+        if (viewModel.messages.isNotEmpty() || viewModel.isSending) {
             listState.animateScrollToItem(0)
         }
     }
@@ -78,45 +80,50 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = { viewModel.personaName?.let { Text(it) } },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { onPersonaDetailClick(personaId) }) {
-                        Icon(Icons.Default.Info, contentDescription = "Detail")
-                    }
-                }
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                actions = { IconButton(onClick = { onPersonaDetailClick(personaId) }) { Icon(Icons.Default.Info, "Detail") } }
             )
         },
         bottomBar = {
-            ChatInput(
-                onSend = { text -> viewModel.sendMessage(text) },
-                enabled = !viewModel.isSending
+            ChatInputArea(
+                onSendText = { text -> viewModel.sendMessage(text) },
+                onSendImageGen = { text -> viewModel.sendImageGenRequest(text) },
+                onStartRecording = { viewModel.startRecording() },
+                onStopRecording = { viewModel.stopRecording() },
+                onCancelRecording = { viewModel.cancelRecording() },
+                isRecording = viewModel.isRecording,
+                isSending = viewModel.isSending
             )
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp),
             state = listState,
-            // [Fix] 保持倒序布局，这对聊天应用至关重要
             reverseLayout = true,
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
-            items(
-                items = viewModel.messages,
-                key = { it.id }
-            ) { msg ->
+            if (viewModel.isSending) {
+                item {
+                    ChatBubble(
+                        msg = ChatMessage(role = "assistant", status = 1, content = ""),
+                        personaAvatarUrl = viewModel.personaAvatarUrl,
+                        personaName = viewModel.personaName,
+                        onAvatarClick = { },
+                        isPlaying = false,
+                        onPlayAudio = { }
+                    )
+                }
+            }
+
+            items(items = viewModel.messages, key = { it.id }) { msg ->
                 ChatBubble(
                     msg = msg,
                     personaAvatarUrl = viewModel.personaAvatarUrl,
                     personaName = viewModel.personaName,
-                    onAvatarClick = { onPersonaDetailClick(personaId) }
+                    onAvatarClick = { onPersonaDetailClick(personaId) },
+                    isPlaying = playingUrl == (msg.localFilePath ?: msg.mediaUrl),
+                    onPlayAudio = { path -> viewModel.playAudio(path) }
                 )
             }
         }
@@ -124,117 +131,71 @@ fun ChatScreen(
 }
 
 @Composable
-fun ChatBubble(
-    msg: ChatMessage,
-    personaAvatarUrl: String,
-    personaName: String?,
-    onAvatarClick: () -> Unit
+fun ChatInputArea(
+    onSendText: (String) -> Unit,
+    onSendImageGen: (String) -> Unit,
+    onStartRecording: () -> Boolean,
+    onStopRecording: () -> Unit,
+    onCancelRecording: () -> Unit,
+    isRecording: Boolean,
+    isSending: Boolean
 ) {
-    val isUser = msg.role == "user"
+    var text by remember { mutableStateOf("") }
+    var isVoiceMode by remember { mutableStateOf(false) }
+    var isImageMode by remember { mutableStateOf(false) }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Top
-    ) {
-        // 🤖 左侧：AI 头像
-        if (!isUser) {
-            Box(modifier = Modifier.clickable { onAvatarClick() }) {
-                ChatAvatar(
-                    url = personaAvatarUrl,
-                    name = personaName ?: "AI"
-                )
+    Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+        if (!isVoiceMode) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isImageMode) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    border = if (!isImageMode) androidx.compose.foundation.BorderStroke(1.dp, Color.Gray) else null,
+                    modifier = Modifier.height(32.dp).clickable { isImageMode = !isImageMode }
+                ) {
+                    Row(modifier = Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Image, "Image Gen", Modifier.size(16.dp), tint = if (isImageMode) MaterialTheme.colorScheme.onPrimaryContainer else Color.Gray)
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (isImageMode) "生图模式已开启" else "AI绘图", style = MaterialTheme.typography.labelMedium, color = if (isImageMode) MaterialTheme.colorScheme.onPrimaryContainer else Color.Gray)
+                    }
+                }
             }
-            Spacer(modifier = Modifier.width(8.dp))
         }
+        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { isVoiceMode = !isVoiceMode }) { Icon(if (isVoiceMode) Icons.Default.Keyboard else Icons.Default.KeyboardVoice, "Switch") }
+            Spacer(Modifier.width(4.dp))
+            if (isVoiceMode) {
+                Box(Modifier.weight(1f)) {
+                    // ✅ [Fix] 这里直接调用 VoiceInputButton.kt 中的 Composable
+                    VoiceInputButton(onStartRecording, onStopRecording, onCancelRecording, isRecording)
+                }
+            } else {
+                OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f), placeholder = { Text(if (isImageMode) "描述你想要生成的画面..." else "Type a message...") }, maxLines = 3, shape = RoundedCornerShape(24.dp))
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = { if (text.isNotBlank()) { if (isImageMode) { onSendImageGen(text); isImageMode = false } else { onSendText(text) }; text = "" } }, enabled = !isSending) { Icon(Icons.AutoMirrored.Filled.Send, "Send") }
+            }
+        }
+    }
+}
 
-        Surface(
-            color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp
-            ),
-            modifier = Modifier.widthIn(max = 260.dp)
-        ) {
-            Text(
-                text = msg.content ?: "",
-                modifier = Modifier.padding(12.dp),
-                color = if (isUser) Color.White else Color.Black,
-                style = MaterialTheme.typography.bodyLarge
-            )
-        }
+// ✅ [Fix] 已删除底部多余的 VoiceInputButton 定义
 
-        // 👤 右侧：用户头像
-        if (isUser) {
-            Spacer(modifier = Modifier.width(8.dp))
-            ChatAvatar(
-                url = "",
-                name = "User"
-            )
+@Composable
+fun ChatBubble(msg: ChatMessage, personaAvatarUrl: String, personaName: String?, onAvatarClick: () -> Unit, isPlaying: Boolean, onPlayAudio: (String) -> Unit) {
+    val isUser = msg.role == "user"
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.Top) {
+        if (!isUser) { Box(modifier = Modifier.clickable { onAvatarClick() }) { ChatAvatar(url = personaAvatarUrl, name = personaName ?: "AI") }; Spacer(modifier = Modifier.width(8.dp)) }
+        Surface(color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = if (isUser) 16.dp else 4.dp, bottomEnd = if (isUser) 4.dp else 16.dp), modifier = Modifier.widthIn(max = 280.dp)) {
+            ChatMessageContent(msg, isUser, isPlaying, onPlayAudio)
         }
+        if (isUser) { Spacer(modifier = Modifier.width(8.dp)); ChatAvatar(url = "", name = "User") }
     }
 }
 
 @Composable
 fun ChatAvatar(url: String, name: String) {
-    val finalUrl = remember(url, name) {
-        if (url.isBlank()) {
-            "https://api.dicebear.com/7.x/avataaars/png?seed=$name"
-        } else {
-            url.replace("/svg", "/png")
-        }
-    }
-
-    Surface(
-        modifier = Modifier.size(40.dp),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.secondaryContainer
-    ) {
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(finalUrl)
-                .crossfade(true)
-                .build(),
-            contentDescription = "Avatar",
-            modifier = Modifier.fillMaxSize().clip(CircleShape),
-            contentScale = ContentScale.Crop,
-            placeholder = rememberVectorPainter(Icons.Default.Person),
-            error = rememberVectorPainter(Icons.Default.Person)
-        )
-    }
-}
-
-@Composable
-fun ChatInput(onSend: (String) -> Unit, enabled: Boolean) {
-    var text by remember { mutableStateOf("") }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("Type a message...") },
-            maxLines = 3,
-            shape = RoundedCornerShape(24.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        IconButton(
-            onClick = {
-                if (text.isNotBlank()) {
-                    onSend(text)
-                    text = ""
-                }
-            },
-            enabled = enabled
-        ) {
-            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-        }
+    val finalUrl = remember(url, name) { if (url.isBlank()) "https://api.dicebear.com/7.x/avataaars/png?seed=$name" else url.replace("/svg", "/png") }
+    Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
+        AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(finalUrl).crossfade(true).build(), contentDescription = "Avatar", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop, placeholder = rememberVectorPainter(Icons.Default.Person), error = rememberVectorPainter(Icons.Default.Person))
     }
 }

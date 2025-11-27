@@ -11,22 +11,37 @@ import androidx.room.PrimaryKey
 )
 data class ChatMessageEntity(
     @PrimaryKey(autoGenerate = true)
-    val id: Long = 0, // 对应 BIGINT AUTO_INCREMENT
+    val id: Long = 0,
 
     @ColumnInfo(name = "user_id")
-    val userId: Long, // 对应 user_id
+    val userId: Long,
 
     @ColumnInfo(name = "persona_id")
-    val personaId: Long, // 对应 persona_id
+    val personaId: Long,
 
-    val role: String, // 对应 "user" 或 "assistant"
+    val role: String, // "user" or "assistant"
 
-    val content: String, // 对应 TEXT
+    val content: String, // Text content or ASR result
 
     @ColumnInfo(name = "created_at")
-    val createdAt: String // 对应 DATETIME，建议存 ISO-8601 字符串
+    val createdAt: String,
+
+    // [New] 多模态字段
+    @ColumnInfo(name = "msg_type")
+    val msgType: Int = 0, // 0:Text, 1:Image, 2:Audio
+
+    @ColumnInfo(name = "media_url")
+    val mediaUrl: String? = null,
+
+    val duration: Int = 0,
+
+    // [New] 本地状态字段 (用于 SSOT 逻辑)
+    // 0:SENDING, 1:GENERATING, 2:SUCCESS, 3:FAILED
+    val status: Int = 2,
+
+    @ColumnInfo(name = "local_file_path")
+    val localFilePath: String? = null
 ) {
-    // 辅助属性：用于 UI 判断显示在左侧还是右侧
     val isUser: Boolean
         get() = role == "user"
 }

@@ -3,6 +3,12 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- ✅ [New] 必须添加录音权限，否则应用会崩溃 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- 可选：如果需要调试本地文件，或者保存录音到外部 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
 
     <application
         android:name=".MainApplication"

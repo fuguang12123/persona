@@ -17,7 +17,7 @@ import com.example.persona.data.local.entity.PostEntity
         PersonaEntity::class,
         PostEntity::class // [New] 注册新表
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(PostTypeConverters::class) // [New] 注册转换器
