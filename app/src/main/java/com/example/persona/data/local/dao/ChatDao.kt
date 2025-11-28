@@ -34,6 +34,24 @@ interface ChatDao {
     """)
     fun getChatHistory(userId: Long, personaId: Long): Flow<List<ChatMessageEntity>>
 
+    // [New] 获取云端消息 (ID >= 0)
+    @Query("""
+        SELECT * FROM chat_messages 
+        WHERE user_id = :userId AND persona_id = :personaId AND id >= 0
+        ORDER BY created_at DESC
+    """)
+    fun getCloudChatHistory(userId: Long, personaId: Long): Flow<List<ChatMessageEntity>>
+
+    // [Fix] 获取私聊消息 (ID < 0)
+    // 统一改为 ORDER BY created_at DESC (最新的在前面)，保持和 Cloud 查询一致。
+    // 这样 ChatRepository 中的 sortedByDescending { it.createdAt } 就只是一个双重保险，而不是必须的修正。
+    @Query("""
+        SELECT * FROM chat_messages 
+        WHERE user_id = :userId AND persona_id = :personaId AND id < 0
+        ORDER BY created_at DESC
+    """)
+    fun getPrivateChatHistory(userId: Long, personaId: Long): Flow<List<ChatMessageEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: ChatMessageEntity): Long
 
@@ -49,8 +67,6 @@ interface ChatDao {
     @Query("DELETE FROM chat_messages WHERE user_id = :userId AND persona_id = :personaId")
     suspend fun clearHistory(userId: Long, personaId: Long)
 
-    // [New] 事务处理：原子性地替换消息，防止 UI 闪烁
-    // 这在一个事务中完成，Flow 只会通知一次变更，用户不会看到消息消失再出现
     @Transaction
     suspend fun replaceLocalWithServerMessage(localMsg: ChatMessageEntity, serverMsg: ChatMessageEntity) {
         deleteMessage(localMsg)
@@ -58,8 +74,6 @@ interface ChatDao {
     }
 
     // --- 会话列表 ---
-
-    // [Fix] 优化查询逻辑 (保持之前的优化)
     @Query("""
         SELECT 
             p.id as personaId, 

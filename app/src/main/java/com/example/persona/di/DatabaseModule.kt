@@ -6,6 +6,7 @@ import com.example.persona.data.local.AppDatabase
 import com.example.persona.data.local.dao.ChatDao
 import com.example.persona.data.local.dao.PersonaDao
 import com.example.persona.data.local.dao.PostDao
+import com.example.persona.data.local.dao.UserMemoryDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -25,7 +26,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "persona_database"
         )
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration() // 开发阶段允许破坏性迁移
             .build()
     }
 
@@ -41,10 +42,16 @@ object DatabaseModule {
         return database.personaDao()
     }
 
-    // [New] 提供 PostDao
     @Provides
     @Singleton
     fun providePostDao(database: AppDatabase): PostDao {
         return database.postDao()
+    }
+
+    // [New] 注入 UserMemoryDao
+    @Provides
+    @Singleton
+    fun provideUserMemoryDao(database: AppDatabase): UserMemoryDao {
+        return database.userMemoryDao()
     }
 }

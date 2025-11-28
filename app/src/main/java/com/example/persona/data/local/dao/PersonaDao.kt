@@ -13,6 +13,10 @@ interface PersonaDao {
     @Query("SELECT * FROM personas WHERE is_public = 1 ORDER BY id DESC")
     fun getAllPersonas(): Flow<List<PersonaEntity>>
 
+    // 🔥 [新增] 根据 ID 获取单个 Persona 详情 (用于端侧 AI 读取人设)
+    @Query("SELECT * FROM personas WHERE id = :id")
+    suspend fun getPersona(id: Long): PersonaEntity?
+
     // 批量插入/更新 (服务器数据回来后调用)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(personas: List<PersonaEntity>)
