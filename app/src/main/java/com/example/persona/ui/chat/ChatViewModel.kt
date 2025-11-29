@@ -1,12 +1,15 @@
 package com.example.persona.ui.chat
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.persona.data.local.UserPreferencesRepository
 import com.example.persona.data.local.entity.UserMemoryEntity
 import com.example.persona.data.model.ChatMessage
+import com.example.persona.data.remote.AuthService
 import com.example.persona.data.repository.ChatRepository
 import com.example.persona.data.repository.PersonaRepository
 import com.example.persona.data.service.LocalLLMService
@@ -24,6 +27,8 @@ import javax.inject.Inject
 class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val personaRepository: PersonaRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val authService: AuthService, // ✅ [New] 注入 AuthService 以获取网络数据
     private val audioRecorder: AudioRecorderManager,
     val audioPlayer: AudioPlayerManager,
     private val localLLMService: LocalLLMService
@@ -32,8 +37,15 @@ class ChatViewModel @Inject constructor(
     // UI State
     var messages by mutableStateOf<List<ChatMessage>>(emptyList())
     var isSending by mutableStateOf(false)
+
+    // AI 信息
     var personaName: String? by mutableStateOf("Chat")
     var personaAvatarUrl by mutableStateOf("")
+
+    // 用户信息
+    var userAvatarUrl by mutableStateOf("")
+    var currentUserName by mutableStateOf("User")
+
     private var currentPersonaId: Long = 0
     var isRecording by mutableStateOf(false)
         private set
@@ -42,13 +54,64 @@ class ChatViewModel @Inject constructor(
     var memories: Flow<List<UserMemoryEntity>> = emptyFlow()
 
     private val typedMessageIds = mutableSetOf<Long>()
-    private var isInitialLoad = true // 用于控制进入页面或切换模式时的动画行为
+    private var isInitialLoad = true
 
     private var messagesJob: Job? = null
 
+    init {
+        // 1. 监听本地缓存 (UI 响应源)
+        loadUserProfile()
+
+        // 2. [New] 异步从后端拉取最新数据并存入本地 (数据同步源)
+        fetchRemoteUserProfile()
+    }
+
+    private fun loadUserProfile() {
+        // 监听头像
+        viewModelScope.launch {
+            userPreferencesRepository.avatarUrl.collect { url ->
+                // ✅ Log 移到这里，这才是真正读到数据的时候
+                Log.d("ChatViewModel", "Flow update avatar: $url")
+                userAvatarUrl = url ?: ""
+            }
+        }
+        // 监听昵称
+        viewModelScope.launch {
+            userPreferencesRepository.userName.collect { name ->
+                currentUserName = name ?: "User"
+            }
+        }
+    }
+
+    /**
+     * [New] 从服务器获取个人信息并更新到本地存储
+     */
+    private fun fetchRemoteUserProfile() {
+        viewModelScope.launch {
+            try {
+                val response = authService.getMyProfile()
+                if (response.isSuccessful && response.body()?.code == 200) {
+                    val userDto = response.body()?.data
+                    if (userDto != null) {
+                        Log.d("ChatViewModel", "Remote fetch success: ${userDto.avatarUrl}")
+                        // ✅ 将网络数据写入 UserPreferencesRepository
+                        // 写入后，上面的 loadUserProfile 中的 Flow 会自动触发，更新 UI
+                        userPreferencesRepository.saveUserInfo(
+                            avatar = userDto.avatarUrl,
+                            name = userDto.nickname
+                        )
+                    }
+                } else {
+                    Log.w("ChatViewModel", "Remote fetch failed: ${response.code()}")
+                }
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Remote fetch error", e)
+            }
+        }
+    }
+
     fun initChat(personaId: Long) {
         currentPersonaId = personaId
-        // 初始化时，视为初始加载
         isInitialLoad = true
         loadMessages()
 
@@ -59,13 +122,12 @@ class ChatViewModel @Inject constructor(
         loadPersonaInfo()
     }
 
-    // [Modified] 核心修改：只允许最新的 AI 回复触发打字机动画
+    // ... (以下所有方法保持不变) ...
+
     private fun loadMessages() {
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
             chatRepository.getMessagesStream(currentPersonaId, isPrivateMode).collectLatest { entities ->
-
-                // 1. 如果是初始加载（或刚切换模式），将当前所有“已完成”的消息标记为已打印，防止历史记录播放动画
                 if (isInitialLoad) {
                     entities.forEach {
                         if (!it.isUser && it.status == 2) typedMessageIds.add(it.id)
@@ -73,32 +135,24 @@ class ChatViewModel @Inject constructor(
                     isInitialLoad = false
                 }
 
-                // 2. 找出“最新”的一条 AI 回复（且状态为完成）
-                // 私密模式 ID 为负数时间戳：数值越小越新 (如 -2000 比 -1000 新) -> minByOrNull
-                // 云端模式 ID 为正数自增/时间戳：数值越大越新 -> maxByOrNull
                 val latestAiMsg = if (isPrivateMode) {
                     entities.filter { !it.isUser && it.status == 2 }.minByOrNull { it.id }
                 } else {
                     entities.filter { !it.isUser && it.status == 2 }.maxByOrNull { it.id }
                 }
 
-                // 3. 关键步骤：将所有“非最新”的 AI 消息强制标记为已打印
-                // 这确保了即使数据流刷新，旧消息也不会重新触发动画
                 entities.filter { !it.isUser && it.status == 2 }.forEach { entity ->
                     if (latestAiMsg == null || entity.id != latestAiMsg.id) {
                         typedMessageIds.add(entity.id)
                     }
                 }
 
-                // 4. 映射 UI 数据
                 val newUiMessages = entities.map { entity ->
-                    // 判断条件：是最新的一条 AI 消息 + 状态完成 + 还没打印过 + 内容不为空
                     val isLatestAi = (latestAiMsg != null && entity.id == latestAiMsg.id)
                     val needsTyping = isLatestAi
                             && !typedMessageIds.contains(entity.id)
                             && !entity.content.isNullOrEmpty()
 
-                    // 如果需要打字机效果，初始显示内容为空，交由协程逐字更新
                     val displayContent = if (needsTyping) "" else entity.content
 
                     ChatMessage(
@@ -116,8 +170,6 @@ class ChatViewModel @Inject constructor(
 
                 messages = newUiMessages
 
-                // 5. 触发打字机协程
-                // 只针对那个被筛选出来的、需要动画的消息启动协程
                 newUiMessages.find {
                     it.id == latestAiMsg?.id
                             && !typedMessageIds.contains(it.id)
@@ -131,7 +183,6 @@ class ChatViewModel @Inject constructor(
 
     fun togglePrivateMode() {
         isPrivateMode = !isPrivateMode
-        // [Modified] 切换模式时重置为 true，这样该模式下的旧消息不会播放动画
         isInitialLoad = true
         loadMessages()
 
@@ -141,27 +192,20 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun startTypewriter(msg: ChatMessage) {
-        // 立即标记为已处理，防止重复触发
         typedMessageIds.add(msg.id)
-
         viewModelScope.launch {
             val fullText = msg.content ?: ""
-            // 根据文本长度动态调整速度
             val delayTime = if (fullText.length > 50) 10L else 30L
 
             for (i in 1..fullText.length) {
-                // 如果用户切走了或消息被删了（简单判断），停止更新
-                // 实际项目中可以加更复杂的取消逻辑
                 kotlinx.coroutines.delay(delayTime)
                 updateMessageDisplayContent(msg.id, fullText.take(i))
             }
-            // 确保最后显示完整
             updateMessageDisplayContent(msg.id, fullText)
         }
     }
 
     private fun updateMessageDisplayContent(msgId: Long, text: String) {
-        // 使用 copy 更新状态，触发 Compose 重组
         messages = messages.map {
             if (it.id == msgId) it.copy(displayContent = text) else it
         }

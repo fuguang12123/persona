@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
@@ -23,10 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Button
@@ -39,6 +36,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -49,7 +48,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,21 +63,38 @@ fun PostFeedScreen(
     viewModel: PostFeedViewModel = hiltViewModel(),
     onPostClick: (Long) -> Unit,
     onCreatePostClick: () -> Unit,
-    // [New] 智能体头像点击回调
     onPersonaClick: (Long) -> Unit
 ) {
     val feedState by viewModel.feedState.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val currentTab by viewModel.currentTab.collectAsState()
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("动态广场") }) },
+        topBar = {
+            Column {
+                TopAppBar(title = { Text("动态广场") })
+                // [New] 顶部 Tab
+                TabRow(selectedTabIndex = currentTab) {
+                    Tab(
+                        selected = currentTab == 0,
+                        onClick = { viewModel.switchTab(0) },
+                        text = { Text("全部") }
+                    )
+                    Tab(
+                        selected = currentTab == 1,
+                        onClick = { viewModel.switchTab(1) },
+                        text = { Text("关注") }
+                    )
+                }
+            }
+        },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onCreatePostClick,
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = Color.White
             ) {
-                Icon(Icons.Default.Add, contentDescription = "发布")
+                Icon(Icons.Default.Add, "发布")
             }
         }
     ) { padding ->
@@ -98,7 +113,9 @@ fun PostFeedScreen(
                     Button(
                         onClick = { viewModel.refresh() },
                         modifier = Modifier.padding(top = 8.dp)
-                    ) { Text("刷新看看") }
+                    ) {
+                        Text("刷新")
+                    }
                 }
             } else {
                 LazyVerticalStaggeredGrid(
@@ -114,17 +131,17 @@ fun PostFeedScreen(
                             onLikeClick = { viewModel.toggleLike(post) },
                             onBookmarkClick = { viewModel.toggleBookmark(post) },
                             onClick = { onPostClick(post.id) },
-                            // [New] 传递回调
                             onPersonaClick = onPersonaClick
                         )
                     }
-                    item { Spacer(modifier = Modifier.height(80.dp)) }
+                    item { Spacer(Modifier.height(80.dp)) }
                 }
             }
-
             if (isRefreshing) {
                 CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp)
                 )
             }
         }
@@ -137,92 +154,71 @@ fun PostCard(
     onLikeClick: () -> Unit,
     onBookmarkClick: () -> Unit,
     onClick: () -> Unit,
-    onPersonaClick: (Long) -> Unit // [New]
+    onPersonaClick: (Long) -> Unit
 ) {
     val context = LocalContext.current
-    val rawAvatar = post.authorAvatar
-    val finalAvatarUrl = remember(rawAvatar) {
-        if (rawAvatar.isNullOrBlank()) {
-            "https://api.dicebear.com/7.x/avataaars/png?seed=${post.authorName ?: "unknown"}"
+
+    // [Logic Update] 头像逻辑统一
+    val avatarUrl = remember(post.authorAvatar, post.authorName) {
+        if (post.authorAvatar.isNullOrBlank()) {
+            "https://api.dicebear.com/7.x/avataaars/png?seed=${post.authorName}"
         } else {
-            rawAvatar.replace("/svg", "/png")
+            post.authorAvatar.replace("/svg", "/png")
         }
     }
 
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
     ) {
         Column {
-            val images = post.imageUrls
-            if (images.isNotEmpty()) {
-                Box {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(images.first())
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .wrapContentHeight()
-                            .heightIn(max = 280.dp)
-                    )
-                    if (images.size > 1) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Multiple",
-                            tint = Color.White,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(8.dp)
-                                .size(20.dp)
-                                .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-                                .padding(2.dp)
-                        )
-                    }
-                }
+            if (!post.imageUrls.isNullOrEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(post.imageUrls.first())
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 280.dp)
+                )
             }
-
-            Column(modifier = Modifier.padding(10.dp)) {
+            Column(Modifier.padding(10.dp)) {
                 if (post.content.isNotBlank()) {
                     Text(
                         text = post.content,
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
-                        color = Color.Black,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                 }
 
-                // [Fix] 作者栏可点击，跳转到智能体详情
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.clickable {
-                        // 解析 PersonaId (String -> Long)
-                        val pid = post.personaId.toLongOrNull() ?: 0L
-                        if (pid > 0) onPersonaClick(pid)
+                        post.personaId.toLongOrNull()?.let {
+                            if (it > 0) onPersonaClick(it)
+                        }
                     }
                 ) {
                     AsyncImage(
                         model = ImageRequest.Builder(context)
-                            .data(finalAvatarUrl)
+                            .data(avatarUrl)
                             .crossfade(true)
                             .build(),
                         contentDescription = null,
                         modifier = Modifier
                             .size(20.dp)
-                            .clip(CircleShape)
-                            .background(Color.LightGray),
-                        contentScale = ContentScale.Crop,
-                        placeholder = rememberVectorPainter(Icons.Default.Person),
-                        error = rememberVectorPainter(Icons.Default.Person)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = post.authorName ?: "Unknown",
                         style = MaterialTheme.typography.labelSmall,
@@ -232,39 +228,35 @@ fun PostCard(
                         modifier = Modifier.weight(1f)
                     )
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
+                Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable(onClick = onLikeClick)
+                        modifier = Modifier.clickable(onClick = onLikeClick),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = if (post.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "Like",
+                            contentDescription = null,
                             tint = if (post.isLiked) Color(0xFFFF4D4F) else Color.Gray,
                             modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text(
                             text = if (post.likes > 0) "${post.likes}" else "赞",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
                     }
-
                     IconButton(
                         onClick = onBookmarkClick,
                         modifier = Modifier.size(24.dp)
                     ) {
                         Icon(
                             imageVector = if (post.isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
-                            contentDescription = "Bookmark",
+                            contentDescription = null,
                             tint = if (post.isBookmarked) Color(0xFFFFC107) else Color.Gray
                         )
                     }

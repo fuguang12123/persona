@@ -7,7 +7,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.persona.data.model.Persona
-import com.example.persona.data.remote.PostService // 需要这个来上传图片
+import com.example.persona.data.remote.PostService
 import com.example.persona.data.repository.PersonaRepository
 import com.example.persona.utils.UriUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,10 +27,7 @@ data class CreatePersonaUiState(
     val description: String = "",
     val prompt: String = "",
     val avatarUrl: String = "",
-
-    // [Mod] 标签改为 List 以便在 UI 上做成 Chip
     val tags: List<String> = emptyList(),
-
     val isEditMode: Boolean = false,
     val isLoading: Boolean = false,
     val isSuccess: Boolean = false,
@@ -40,7 +37,7 @@ data class CreatePersonaUiState(
 @HiltViewModel
 class CreatePersonaViewModel @Inject constructor(
     private val repository: PersonaRepository,
-    private val postService: PostService, // 用于上传图片
+    private val postService: PostService,
     savedStateHandle: SavedStateHandle,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -67,7 +64,6 @@ class CreatePersonaViewModel @Inject constructor(
                         description = persona.description ?: "",
                         prompt = persona.promptTemplate ?: "",
                         avatarUrl = persona.avatarUrl ?: "",
-                        // 解析逗号分隔的字符串回 List
                         tags = persona.personalityTags?.split(",", "，")?.filter { t -> t.isNotBlank() } ?: emptyList(),
                         isLoading = false
                     )
@@ -83,7 +79,6 @@ class CreatePersonaViewModel @Inject constructor(
     fun onDescChange(v: String) = _uiState.update { it.copy(description = v) }
     fun onPromptChange(v: String) = _uiState.update { it.copy(prompt = v) }
 
-    // [Mod] 标签操作
     fun addTag(tag: String) {
         if (tag.isNotBlank() && !_uiState.value.tags.contains(tag)) {
             _uiState.update { it.copy(tags = it.tags + tag) }
@@ -94,7 +89,6 @@ class CreatePersonaViewModel @Inject constructor(
         _uiState.update { it.copy(tags = it.tags - tag) }
     }
 
-    // [Mod] 图片上传逻辑
     fun uploadAvatar(uri: Uri) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
@@ -125,12 +119,31 @@ class CreatePersonaViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            // repository.generateDescription 现在返回的是 JSON String
+
+            // 1. 调用 Repository (后端现在会根据名字生成完整的 JSON)
             val jsonStr = repository.generateDescription(name)
 
+            // 2. 空值检查
+            if (jsonStr.isNullOrBlank()) {
+                Log.e("CreatePersona", "AI response is empty")
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "生成失败：AI 未返回数据，请检查网络"
+                    )
+                }
+                return@launch
+            }
+
             try {
-                // 简单的 JSON 解析
-                val json = JSONObject(jsonStr)
+                // 3. 清洗 Markdown (防止 AI 返回 ```json)
+                val cleanJsonStr = jsonStr.trim()
+                    .replace("```json", "")
+                    .replace("```", "")
+                    .trim()
+
+                // 4. 解析 JSON
+                val json = JSONObject(cleanJsonStr)
                 val desc = json.optString("description")
                 val prompt = json.optString("prompt")
                 val tagsJson = json.optJSONArray("tags")
@@ -142,18 +155,28 @@ class CreatePersonaViewModel @Inject constructor(
                     }
                 }
 
+                // 5. 成功！一次性填入所有字段
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         description = desc,
                         prompt = prompt,
-                        tags = newTags
+                        tags = newTags,
+                        error = null // 清除错误
                     )
                 }
+                Log.d("CreatePersona", "AI Generation Success: $desc")
+
             } catch (e: Exception) {
-                Log.e("CreatePersona", "JSON Parse Error", e)
-                // 降级处理：如果解析失败，直接放入描述框
-                _uiState.update { it.copy(isLoading = false, description = jsonStr) }
+                Log.e("CreatePersona", "JSON Parse Error: $jsonStr", e)
+                // 6. 降级处理：如果万一解析失败，把原始内容填进去
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        description = jsonStr,
+                        error = "格式解析部分失败，已填入原始内容"
+                    )
+                }
             }
         }
     }
@@ -173,7 +196,6 @@ class CreatePersonaViewModel @Inject constructor(
                 description = state.description,
                 promptTemplate = state.prompt,
                 avatarUrl = state.avatarUrl,
-                // 将 List 转回逗号分隔的字符串存库
                 personalityTags = state.tags.joinToString(","),
                 isPublic = true
             )

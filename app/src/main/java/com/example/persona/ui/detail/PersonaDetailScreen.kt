@@ -22,10 +22,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -64,9 +67,9 @@ import coil.request.ImageRequest
 fun PersonaDetailScreen(
     personaId: Long,
     onBackClick: () -> Unit,
-    onChatClick: (Long) -> Unit,       // 回调：去聊天
-    onCreatePostClick: (Long) -> Unit, // 回调：去发帖 (带 ID)
-    onEditClick: (Long) -> Unit,       // 回调：去编辑 (仅号主可用)
+    onChatClick: (Long) -> Unit,
+    onCreatePostClick: (Long) -> Unit,
+    onEditClick: (Long) -> Unit,
     viewModel: PersonaDetailViewModel = hiltViewModel()
 ) {
     LaunchedEffect(personaId) {
@@ -77,10 +80,12 @@ fun PersonaDetailScreen(
     val persona = uiState.persona
     val context = LocalContext.current
 
-    val avatarUrl = remember(persona?.avatarUrl) {
+    // [Logic Update] 统一头像逻辑
+    val avatarUrl = remember(persona?.avatarUrl, persona?.name) {
         val url = persona?.avatarUrl
+        val name = persona?.name ?: "unknown"
         if (url.isNullOrBlank()) {
-            "https://api.dicebear.com/7.x/avataaars/png?seed=${persona?.name ?: "unknown"}"
+            "https://api.dicebear.com/7.x/avataaars/png?seed=$name"
         } else {
             url.replace("/svg", "/png")
         }
@@ -93,10 +98,13 @@ fun PersonaDetailScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = onBackClick,
-                        modifier = Modifier
-                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                        modifier = Modifier.background(Color.Black.copy(0.3f), CircleShape)
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White
+                        )
                     }
                 },
                 actions = {
@@ -105,31 +113,45 @@ fun PersonaDetailScreen(
                             onClick = { onEditClick(personaId) },
                             modifier = Modifier
                                 .padding(end = 8.dp)
-                                .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                                .background(Color.Black.copy(0.3f), CircleShape)
                         ) {
-                            Icon(Icons.Default.Edit, "Edit", tint = Color.White)
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit",
+                                tint = Color.White
+                            )
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
-        },
-        containerColor = MaterialTheme.colorScheme.surface
+        }
     ) { _ ->
-
         if (uiState.isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator()
             }
         } else if (uiState.error != null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = uiState.error!!, color = Color.Red)
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = uiState.error!!,
+                    color = Color.Red
+                )
             }
         } else if (persona != null) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // --- A. 背景大图层 ---
+            Box(Modifier.fillMaxSize()) {
+                // 背景图
                 AsyncImage(
-                    model = ImageRequest.Builder(context).data(avatarUrl).crossfade(true).build(),
+                    model = ImageRequest.Builder(context)
+                        .data(avatarUrl)
+                        .crossfade(true)
+                        .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -144,149 +166,149 @@ fun PersonaDetailScreen(
                         .height(300.dp)
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                listOf(Color.Transparent, Color.Black.copy(0.7f))
                             )
                         )
                 )
 
-                // --- B. 滚动内容层 ---
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                 ) {
-                    // 留白，让出头部大图区域
-                    Spacer(modifier = Modifier.height(220.dp))
-
-                    // [Fix] 使用 Box 包裹卡片和头像，避免 Surface 裁切头像
-                    Box(modifier = Modifier.fillMaxWidth()) {
-
-                        // 1. 白色圆角卡片 (作为背景)
+                    Spacer(Modifier.height(220.dp))
+                    Box(Modifier.fillMaxWidth()) {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 50.dp), // 给头像的上半部分留出空间
+                                .padding(top = 50.dp),
                             shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-                            color = MaterialTheme.colorScheme.surface,
                             tonalElevation = 2.dp
                         ) {
                             Column(
                                 modifier = Modifier
                                     .padding(horizontal = 24.dp)
-                                    .padding(top = 60.dp, bottom = 24.dp), // top=60dp: 50dp头像下半部 + 10dp间距
+                                    .padding(top = 60.dp, bottom = 24.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                // 2. 信息展示 (名字 & 创建人)
                                 Text(
                                     text = persona.name,
                                     style = MaterialTheme.typography.headlineMedium,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
+                                Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = "Created by ${uiState.creatorName}",
                                     style = MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.primary
                                 )
+                                Spacer(Modifier.height(16.dp))
 
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                // 3. 标签流
                                 if (uiState.tags.isNotEmpty()) {
                                     FlowRow(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.fillMaxWidth()
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         uiState.tags.forEach { tag ->
                                             SuggestionChip(
                                                 onClick = { },
                                                 label = { Text(tag) },
-                                                enabled = false,
-                                                colors = androidx.compose.material3.SuggestionChipDefaults.suggestionChipColors(
-                                                    disabledContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                                    disabledLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                                ),
-                                                border = null
+                                                enabled = false
                                             )
                                         }
                                     }
-                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Spacer(Modifier.height(24.dp))
                                 }
 
-                                // --- 4. 按钮区域 ---
+                                // 按钮区域
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
                                     Button(
                                         onClick = { onChatClick(personaId) },
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
+                                        modifier = Modifier.weight(1f)
                                     ) {
-                                        Icon(Icons.AutoMirrored.Filled.Chat, null, modifier = Modifier.size(18.dp))
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Chat,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                         Spacer(Modifier.width(8.dp))
                                         Text("开始聊天")
                                     }
 
+                                    // 关注按钮
                                     FilledTonalButton(
-                                        onClick = { onCreatePostClick(personaId) },
+                                        onClick = { viewModel.toggleFollow(personaId) },
                                         modifier = Modifier.weight(1f),
-                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
+                                        colors = if (uiState.isFollowed) {
+                                            ButtonDefaults.filledTonalButtonColors(
+                                                containerColor = Color.Gray.copy(0.2f)
+                                            )
+                                        } else {
+                                            ButtonDefaults.filledTonalButtonColors()
+                                        }
                                     ) {
-                                        Icon(Icons.Default.Image, null, modifier = Modifier.size(18.dp))
+                                        Icon(
+                                            imageVector = if (uiState.isFollowed) Icons.Default.Check else Icons.Default.Add,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                         Spacer(Modifier.width(8.dp))
-                                        Text("发布动态")
+                                        Text(if (uiState.isFollowed) "已关注" else "关注")
                                     }
                                 }
 
-                                // 5. 编辑按钮 (仅号主)
-                                if (uiState.isOwner) {
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    OutlinedButton(
-                                        onClick = { onEditClick(personaId) },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("编辑资料")
-                                    }
+                                Spacer(Modifier.height(12.dp))
+                                OutlinedButton(
+                                    onClick = { onCreatePostClick(personaId) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Image,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("发布动态")
                                 }
 
-                                Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(Modifier.height(24.dp))
                                 HorizontalDivider(thickness = 0.5.dp)
-                                Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(Modifier.height(24.dp))
 
-                                // 6. 描述
-                                Column(modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.fillMaxWidth()) {
                                     Text(
                                         text = "关于智能体",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold
                                     )
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Spacer(Modifier.height(8.dp))
                                     Text(
                                         text = persona.description ?: "暂无描述",
                                         style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.5
                                     )
                                 }
-                                Spacer(modifier = Modifier.height(80.dp))
+                                Spacer(Modifier.height(80.dp))
                             }
                         }
 
-                        // [Fix] 悬浮头像 (移出 Surface，放在 Box 上层)
+                        // 圆形头像
                         Box(
                             modifier = Modifier
-                                .align(Alignment.TopCenter) // 居中顶部对齐
+                                .align(Alignment.TopCenter)
                                 .size(100.dp)
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.surface)
                                 .border(4.dp, MaterialTheme.colorScheme.surface, CircleShape)
                         ) {
                             AsyncImage(
-                                model = ImageRequest.Builder(context).data(avatarUrl).crossfade(true).build(),
+                                model = ImageRequest.Builder(context)
+                                    .data(avatarUrl)
+                                    .crossfade(true)
+                                    .build(),
                                 contentDescription = "Avatar",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop,

@@ -5,8 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.persona.data.local.UserPreferencesRepository
 import com.example.persona.data.local.dao.ChatDao
 import com.example.persona.data.local.dao.ConversationView
+import com.example.persona.data.model.Persona
 import com.example.persona.data.repository.ChatRepository
-import com.example.persona.data.repository.PostRepository // [New] 引入 PostRepository
+import com.example.persona.data.repository.PersonaRepository
+import com.example.persona.data.repository.PostRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,13 +26,17 @@ import javax.inject.Inject
 class ChatListViewModel @Inject constructor(
     private val chatDao: ChatDao,
     private val chatRepository: ChatRepository,
-    private val postRepository: PostRepository, // [New] 注入以获取未读数
+    private val postRepository: PostRepository,
+    private val personaRepository: PersonaRepository, // [New]
     private val userPrefs: UserPreferencesRepository
 ) : ViewModel() {
 
-    // [New] 未读通知数量 State
     private val _unreadCount = MutableStateFlow(0L)
-    val unreadCount: StateFlow<Long> = _unreadCount.asStateFlow()
+    val unreadCount = _unreadCount.asStateFlow()
+
+    // [New] 关注列表数据
+    private val _followedPersonas = MutableStateFlow<List<Persona>>(emptyList())
+    val followedPersonas = _followedPersonas.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val conversations: StateFlow<List<ConversationView>> = userPrefs.userId
@@ -39,7 +45,6 @@ class ChatListViewModel @Inject constructor(
             if (userId != 0L) {
                 viewModelScope.launch {
                     chatRepository.syncConversationList()
-                    // [New] 每次同步会话时，顺便同步一下未读红点
                     refreshUnreadCount()
                 }
                 chatDao.getConversations(userId)
@@ -48,17 +53,16 @@ class ChatListViewModel @Inject constructor(
             }
         }
         .map { list -> list.distinctBy { it.personaId } }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // [New] 刷新未读数量的方法，供 UI 调用
     fun refreshUnreadCount() {
+        viewModelScope.launch { _unreadCount.value = postRepository.getUnreadCount() }
+    }
+
+    // [New] 加载关注列表
+    fun loadFollowedPersonas() {
         viewModelScope.launch {
-            val count = postRepository.getUnreadCount()
-            _unreadCount.value = count
+            _followedPersonas.value = personaRepository.getFollowedPersonas()
         }
     }
 }

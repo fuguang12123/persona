@@ -79,19 +79,18 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val playingUrl by viewModel.audioPlayer.currentPlayingUrl.collectAsState()
 
-    // 控制记忆弹窗显示
     var showMemoryDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(personaId) { viewModel.initChat(personaId) }
+    LaunchedEffect(personaId) {
+        viewModel.initChat(personaId)
+    }
 
-    // 当有新消息时自动滚动到底部
     LaunchedEffect(viewModel.messages.size, viewModel.isSending) {
         if (viewModel.messages.isNotEmpty()) {
             listState.animateScrollToItem(0)
         }
     }
 
-    // 记忆弹窗
     if (showMemoryDialog) {
         val memoryList by viewModel.memories.collectAsState(initial = emptyList())
 
@@ -99,30 +98,50 @@ fun ChatScreen(
             onDismissRequest = { showMemoryDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Face, null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        imageVector = Icons.Default.Face,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text("共生记忆库")
                 }
             },
             text = {
                 if (memoryList.isEmpty()) {
-                    Text("暂时还没有提取到关于你的记忆...", fontStyle = FontStyle.Italic, color = Color.Gray)
+                    Text(
+                        text = "暂时还没有提取到关于你的记忆...",
+                        fontStyle = FontStyle.Italic,
+                        color = Color.Gray
+                    )
                 } else {
                     LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                         items(memoryList) { memory ->
                             Column(Modifier.padding(vertical = 4.dp)) {
                                 Row(verticalAlignment = Alignment.Top) {
-                                    Text("• ", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                    Text(memory.content, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = "• ",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = memory.content,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
                                 }
-                                HorizontalDivider(modifier = Modifier.padding(top = 4.dp), color = Color.LightGray.copy(alpha = 0.5f))
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(top = 4.dp),
+                                    color = Color.LightGray.copy(alpha = 0.5f)
+                                )
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showMemoryDialog = false }) { Text("关闭") }
+                TextButton(onClick = { showMemoryDialog = false }) {
+                    Text("关闭")
+                }
             }
         )
     }
@@ -133,11 +152,10 @@ fun ChatScreen(
                 title = {
                     Column {
                         viewModel.personaName?.let { Text(it) }
-                        // 状态指示：端侧模式为绿色
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val color = if (viewModel.isPrivateMode) Color(0xFF4CAF50) else Color.Gray
                             Icon(
-                                if (viewModel.isPrivateMode) Icons.Default.Lock else Icons.Default.Cloud,
+                                imageVector = if (viewModel.isPrivateMode) Icons.Default.Lock else Icons.Default.Cloud,
                                 contentDescription = null,
                                 modifier = Modifier.size(12.dp),
                                 tint = color
@@ -151,12 +169,19 @@ fun ChatScreen(
                         }
                     }
                 },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    }
+                },
                 actions = {
-                    // 记忆查看按钮 (仅私密模式显示)
                     if (viewModel.isPrivateMode) {
                         IconButton(onClick = { showMemoryDialog = true }) {
-                            Icon(Icons.Default.Face, "Memory", tint = MaterialTheme.colorScheme.primary)
+                            Icon(
+                                imageVector = Icons.Default.Face,
+                                contentDescription = "Memory",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
 
@@ -165,7 +190,9 @@ fun ChatScreen(
                         onCheckedChange = { viewModel.togglePrivateMode() },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF4CAF50))
                     )
-                    IconButton(onClick = { onPersonaDetailClick(personaId) }) { Icon(Icons.Default.Info, "Detail") }
+                    IconButton(onClick = { onPersonaDetailClick(personaId) }) {
+                        Icon(Icons.Default.Info, "Detail")
+                    }
                 }
             )
         },
@@ -183,15 +210,9 @@ fun ChatScreen(
         }
     ) { padding ->
 
-        // [Fix] 核心修复：私密模式的排序逻辑修正
         val displayMessages = if (viewModel.isPrivateMode) {
-            // 私密模式使用负数时间戳ID (例如: -1732xxxx)。
-            // 数值越小(-2000)代表时间越新，数值越大(-1000)代表时间越旧。
-            // LazyColumn(reverseLayout=true) 需要 Index 0 为最新消息。
-            // 因此我们需要把“最小”的数排在最前面，即使用升序 sortedBy。
             viewModel.messages.sortedBy { it.id }
         } else {
-            // 云端模式直接使用 ViewModel 中的顺序 (Repo层已按时间降序排列)
             viewModel.messages
         }
 
@@ -205,8 +226,6 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
-            // [Fix] 恢复云端模式下的加载动画
-            // 仅在非私密模式（云端）且正在发送、且最新消息是用户发送（AI还没回复）时显示
             val showCloudLoading = viewModel.isSending &&
                     !viewModel.isPrivateMode &&
                     (displayMessages.isEmpty() || displayMessages.firstOrNull()?.role == "user")
@@ -217,6 +236,8 @@ fun ChatScreen(
                         msg = ChatMessage(role = "assistant", status = 1, content = ""),
                         personaAvatarUrl = viewModel.personaAvatarUrl,
                         personaName = viewModel.personaName,
+                        userAvatarUrl = viewModel.userAvatarUrl, // Pass user info
+                        userName = viewModel.currentUserName,    // Pass user info
                         onAvatarClick = { },
                         isPlaying = false,
                         onPlayAudio = { }
@@ -229,6 +250,8 @@ fun ChatScreen(
                     msg = msg,
                     personaAvatarUrl = viewModel.personaAvatarUrl,
                     personaName = viewModel.personaName,
+                    userAvatarUrl = viewModel.userAvatarUrl, // [New] Pass user avatar
+                    userName = viewModel.currentUserName,    // [New] Pass user name
                     onAvatarClick = { onPersonaDetailClick(personaId) },
                     isPlaying = playingUrl == (msg.localFilePath ?: msg.mediaUrl),
                     onPlayAudio = { path -> viewModel.playAudio(path) }
@@ -253,28 +276,59 @@ fun ChatInputArea(
     var isVoiceMode by remember { mutableStateOf(false) }
     var isImageMode by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
-        // 私密模式下隐藏生图入口
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
         if (!isVoiceMode && !isPrivateMode) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = if (isImageMode) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
                     border = if (!isImageMode) androidx.compose.foundation.BorderStroke(1.dp, Color.Gray) else null,
-                    modifier = Modifier.height(32.dp).clickable { isImageMode = !isImageMode }
+                    modifier = Modifier
+                        .height(32.dp)
+                        .clickable { isImageMode = !isImageMode }
                 ) {
-                    Row(modifier = Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Image, "Image Gen", Modifier.size(16.dp), tint = if (isImageMode) MaterialTheme.colorScheme.onPrimaryContainer else Color.Gray)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Image,
+                            contentDescription = "Image Gen",
+                            modifier = Modifier.size(16.dp),
+                            tint = if (isImageMode) MaterialTheme.colorScheme.onPrimaryContainer else Color.Gray
+                        )
                         Spacer(Modifier.width(4.dp))
-                        Text(if (isImageMode) "生图模式已开启" else "AI绘图", style = MaterialTheme.typography.labelMedium, color = if (isImageMode) MaterialTheme.colorScheme.onPrimaryContainer else Color.Gray)
+                        Text(
+                            text = if (isImageMode) "生图模式已开启" else "AI绘图",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isImageMode) MaterialTheme.colorScheme.onPrimaryContainer else Color.Gray
+                        )
                     }
                 }
             }
         }
-        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            // 私密模式下隐藏语音切换，用 Spacer 占位
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             if (!isPrivateMode) {
-                IconButton(onClick = { isVoiceMode = !isVoiceMode }) { Icon(if (isVoiceMode) Icons.Default.Keyboard else Icons.Default.KeyboardVoice, "Switch") }
+                IconButton(onClick = { isVoiceMode = !isVoiceMode }) {
+                    Icon(
+                        imageVector = if (isVoiceMode) Icons.Default.Keyboard else Icons.Default.KeyboardVoice,
+                        contentDescription = "Switch"
+                    )
+                }
             } else {
                 Spacer(Modifier.width(48.dp))
             }
@@ -291,22 +345,32 @@ fun ChatInputArea(
                     onValueChange = { text = it },
                     modifier = Modifier.weight(1f),
                     placeholder = {
-                        Text(if (isPrivateMode) "🔒 私密对话中 (记忆共生)" else if (isImageMode) "描述你想要生成的画面..." else "Type a message...")
+                        Text(
+                            if (isPrivateMode) "🔒 私密对话中 (记忆共生)"
+                            else if (isImageMode) "描述你想要生成的画面..."
+                            else "Type a message..."
+                        )
                     },
                     maxLines = 3,
                     shape = RoundedCornerShape(24.dp)
                 )
                 Spacer(Modifier.width(8.dp))
-                IconButton(onClick = {
-                    if (text.isNotBlank()) {
-                        if (isImageMode && !isPrivateMode) {
-                            onSendImageGen(text); isImageMode = false
-                        } else {
-                            onSendText(text)
-                        };
-                        text = ""
-                    }
-                }, enabled = !isSending) { Icon(Icons.AutoMirrored.Filled.Send, "Send") }
+                IconButton(
+                    onClick = {
+                        if (text.isNotBlank()) {
+                            if (isImageMode && !isPrivateMode) {
+                                onSendImageGen(text)
+                                isImageMode = false
+                            } else {
+                                onSendText(text)
+                            }
+                            text = ""
+                        }
+                    },
+                    enabled = !isSending
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, "Send")
+                }
             }
         }
     }
@@ -318,6 +382,8 @@ fun ChatBubble(
     msg: ChatMessage,
     personaAvatarUrl: String,
     personaName: String?,
+    userAvatarUrl: String, // [New] 参数
+    userName: String,      // [New] 参数
     onAvatarClick: () -> Unit,
     isPlaying: Boolean,
     onPlayAudio: (String) -> Unit
@@ -328,6 +394,7 @@ fun ChatBubble(
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Top
     ) {
+        // AI Avatar (左侧)
         if (!isUser) {
             Box(modifier = Modifier.clickable { onAvatarClick() }) {
                 ChatAvatar(url = personaAvatarUrl, name = personaName ?: "AI")
@@ -353,9 +420,11 @@ fun ChatBubble(
             )
         }
 
+        // User Avatar (右侧)
         if (isUser) {
             Spacer(modifier = Modifier.width(8.dp))
-            ChatAvatar(url = "", name = "User")
+            // [Modified] 使用传入的真实用户头像和昵称
+            ChatAvatar(url = userAvatarUrl, name = userName)
         }
     }
 }
@@ -363,8 +432,15 @@ fun ChatBubble(
 @Composable
 fun ChatAvatar(url: String, name: String) {
     val finalUrl = remember(url, name) {
-        if (url.isBlank()) "https://api.dicebear.com/7.x/avataaars/png?seed=$name" else url.replace("/svg", "/png")
+        // [Logic] 如果 url 为空，使用 DiceBear 生成基于昵称的头像
+        // 否则使用原图，并将 svg 替换为 png
+        if (url.isBlank()) {
+            "https://api.dicebear.com/7.x/avataaars/png?seed=$name"
+        } else {
+            url.replace("/svg", "/png")
+        }
     }
+
     Surface(
         modifier = Modifier.size(40.dp),
         shape = CircleShape,

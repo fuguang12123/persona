@@ -41,7 +41,10 @@ data class NotificationDto(
 // === 响应体 (超级容错版) ===
 data class PostDto(
     val id: Long,
+
+    // [New] 新增 userId 字段，用于跳转到用户或区分是否是自己
     val userId: Long?,
+
     val personaId: String,
     val content: String,
 
@@ -55,6 +58,7 @@ data class PostDto(
     val authorAvatar: String?,
     val isLiked: Boolean,
 
+    // [New] 新增 isBookmarked 字段，用于列表页显示星星
     val isBookmarked: Boolean = false
 ) {
     val imageUrls: List<String>
@@ -77,7 +81,9 @@ data class PostDto(
     val createdAt: Long
         get() {
             if (_createdAt == null) return 0L
+            // 如果是纯数字字符串，直接转 Long
             _createdAt.toLongOrNull()?.let { return it }
+            // 否则尝试解析 ISO 时间格式
             try {
                 val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
                 return isoFormat.parse(_createdAt)?.time ?: 0L
@@ -86,6 +92,7 @@ data class PostDto(
             }
         }
 
+    // 转为本地实体 (用于缓存)
     fun toEntity(ownerUserId: String): PostEntity {
         return PostEntity(
             id = id,

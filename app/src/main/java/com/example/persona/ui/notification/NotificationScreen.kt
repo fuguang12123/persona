@@ -68,39 +68,56 @@ fun NotificationScreen(
                 title = { Text("消息通知") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        // [Fix] 使用 AutoMirrored.Filled.ArrowBack
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
                     }
                 }
             )
         }
     ) { padding ->
         if (isLoading && notifications.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator()
             }
         } else if (notifications.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        Icons.Default.Notifications,
+                        imageVector = Icons.Default.Notifications,
                         contentDescription = null,
                         tint = Color.LightGray,
                         modifier = Modifier.size(64.dp)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("暂无新消息", color = Color.Gray)
+                    Text(
+                        text = "暂无新消息",
+                        color = Color.Gray
+                    )
                 }
             }
         } else {
             LazyColumn(
-                modifier = Modifier.padding(padding).fillMaxSize()
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
             ) {
                 items(notifications) { item ->
-                    NotificationItem(notification = item, onClick = {
-                        onPostClick(item.postId)
-                    })
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray.copy(alpha = 0.3f))
+                    NotificationItem(
+                        notification = item,
+                        onClick = { onPostClick(item.postId) }
+                    )
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = Color.LightGray.copy(alpha = 0.3f)
+                    )
                 }
             }
         }
@@ -112,12 +129,9 @@ fun NotificationItem(
     notification: NotificationDto,
     onClick: () -> Unit
 ) {
-    // [Fix] 修复 Deprecated 警告，使用 AutoMirrored 图标
-    val (icon, iconColor, actionText) = when(notification.type) {
+    val (icon, iconColor, actionText) = when (notification.type) {
         1 -> Triple(Icons.Default.Favorite, Color(0xFFFF5252), "赞了你的动态")
-        // [Fix] AutoMirrored.Filled.Message
         2 -> Triple(Icons.AutoMirrored.Filled.Message, Color(0xFF2196F3), "评论了你的动态")
-        // [Fix] AutoMirrored.Filled.Reply
         3 -> Triple(Icons.AutoMirrored.Filled.Reply, Color(0xFF4CAF50), "回复了你的评论")
         else -> Triple(Icons.Default.Notifications, Color.Gray, "有一条新通知")
     }
@@ -133,6 +147,15 @@ fun NotificationItem(
         }
     }
 
+    // [Logic Update] 统一头像逻辑
+    val avatarUrl = remember(notification.senderAvatar, notification.senderName) {
+        if (notification.senderAvatar.isNullOrBlank()) {
+            "https://api.dicebear.com/7.x/avataaars/png?seed=${notification.senderName}"
+        } else {
+            notification.senderAvatar.replace("/svg", "/png")
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -142,7 +165,7 @@ fun NotificationItem(
     ) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
-                .data(notification.senderAvatar ?: "https://api.dicebear.com/7.x/avataaars/png?seed=${notification.senderName}")
+                .data(avatarUrl)
                 .crossfade(true)
                 .build(),
             contentDescription = null,
