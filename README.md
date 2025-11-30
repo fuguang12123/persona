@@ -384,7 +384,9 @@ cd Persona
 1. 使用 Android Studio 打开项目
    2. 等待 Gradle 同步完成
    3. 连接 Android 设备或启动模拟器
-   4. 点击运行按钮构建并安装应用
+  如果是真机请执行：
+  adb reverse  tcp:8080  tcp:8080       
+   5. 点击运行按钮构建并安装应用
 
 ## 项目特色与未来展望
 
