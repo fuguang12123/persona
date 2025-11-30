@@ -369,7 +369,7 @@ class LocalLLMService @Inject constructor(
 ### 克隆项目
 
 ```bash
-git clone [项目地址]
+git clone https://github.com/fuguang12123/persona.git
 cd Persona
 ```
 
@@ -384,7 +384,9 @@ cd Persona
 1. 使用 Android Studio 打开项目
    2. 等待 Gradle 同步完成
    3. 连接 Android 设备或启动模拟器
-   4. 点击运行按钮构建并安装应用
+  如果是真机请执行：
+  adb reverse  tcp:8080  tcp:8080       
+   5. 点击运行按钮构建并安装应用
 
 ## 项目特色与未来展望
 
@@ -414,29 +416,11 @@ cd Persona
 
 ---
 
-## 贡献指南
-
-欢迎贡献代码！请遵循以下步骤：
-
-1. Fork 本仓库
-   2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-   3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-   4. 推送到分支 (`git push origin feature/AmazingFeature`)
-   5. 开启 Pull Request
 
 ## 许可证
 
 本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
 
-## 联系方式
-
-如有问题或建议，请通过以下方式联系：
-
-- 项目主页: [项目GitHub链接]
-  - 问题反馈: [Issues链接]
-  - 邮箱: [联系邮箱]
-
----
 
 **感谢您对Persona项目的关注！**
 
@@ -460,15 +444,7 @@ cd Persona
       - 云端模式下对话数据会被发送到服务器进行处理
       - 用户数据按照隐私政策进行处理和保护
 
-## 贡献指南
 
-欢迎贡献代码！请遵循以下步骤：
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
 
 ## 许可证
 
@@ -479,7 +455,7 @@ cd Persona
 如有问题或建议，请通过以下方式联系：
 
 - 提交 Issue
-- 发送邮件至 [your-email@example.com]
+- 发送邮件至 [3326498228@qq.com]
 
 ---
 
