@@ -24,7 +24,7 @@ object NetworkModule {
 
     private val BASE_URL: String
         get() {
-            val port = "8001"
+            val port = "8080"
             // 检测是否在模拟器上运行
             val isEmulator = android.os.Build.FINGERPRINT.startsWith("generic") 
                     || android.os.Build.FINGERPRINT.startsWith("unknown")

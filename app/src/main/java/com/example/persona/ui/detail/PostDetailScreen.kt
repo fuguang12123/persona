@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -85,7 +86,10 @@ fun PostDetailScreen(
 
     val uiState by viewModel.uiState.collectAsState()
     var commentText by remember { mutableStateOf("") }
-    var replyTo by remember { mutableStateOf<Pair<Long, String>?>(null) }
+
+    // [Modified] 增加头像 URL 存储: Triple<Id, Name, AvatarUrl>
+    var replyTo by remember { mutableStateOf<Triple<Long, String, String>?>(null) }
+
     var showFullGallery by remember { mutableStateOf(false) }
     var initialPreviewPage by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
@@ -111,7 +115,6 @@ fun PostDetailScreen(
                             }
                         }
                     ) {
-                        // [Logic Update] 顶部栏头像逻辑
                         val rawAvatar = uiState.authorAvatar ?: uiState.post?.authorAvatar
                         val authorName = uiState.authorName ?: "unknown"
                         val finalAvatarUrl = remember(rawAvatar, authorName) {
@@ -162,7 +165,6 @@ fun PostDetailScreen(
                     }
                 },
                 actions = {
-                    // [New] 动态详情页的关注按钮
                     TextButton(onClick = { viewModel.toggleFollowAuthor() }) {
                         Text(if (uiState.isAuthorFollowed) "已关注" else "关注")
                     }
@@ -176,23 +178,49 @@ fun PostDetailScreen(
                 tonalElevation = 2.dp
             ) {
                 Column {
+                    // [Modified] 回复提示栏显示头像
                     if (replyTo != null) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(Color(0xFFF0F0F0))
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "回复 ${replyTo!!.second}:",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.Gray
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "回复 ",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                                // 显示被回复者的头像
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(replyTo!!.third) // Avatar URL
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Gray),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = replyTo!!.second, // Name
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.DarkGray,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
                             TextButton(
                                 onClick = { replyTo = null },
-                                modifier = Modifier.height(24.dp)
+                                modifier = Modifier.height(24.dp),
+                                contentPadding = PaddingValues(0.dp)
                             ) {
                                 Text("取消", style = MaterialTheme.typography.labelSmall)
                             }
@@ -297,7 +325,6 @@ fun PostDetailScreen(
                                         }
                                 )
                             }
-                            // 指示器省略...
                         }
                     }
                 }
@@ -321,7 +348,6 @@ fun PostDetailScreen(
                             color = Color.LightGray
                         )
                         Spacer(Modifier.height(8.dp))
-                        // 评论统计
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = "共 ${uiState.commentGroups.sumOf { 1 + it.replies.size }} 条评论",
@@ -333,7 +359,10 @@ fun PostDetailScreen(
                 }
 
                 items(uiState.commentGroups) { group ->
-                    CommentGroupItem(group) { id, name -> replyTo = id to name }
+                    // [Modified] 传递 avatar
+                    CommentGroupItem(group) { id, name, avatar ->
+                        replyTo = Triple(id, name, avatar)
+                    }
                 }
 
                 item { Spacer(Modifier.height(50.dp)) }
@@ -344,29 +373,28 @@ fun PostDetailScreen(
 
 // 辅助组件：评论组
 @Composable
-fun CommentGroupItem(group: CommentGroup, onReplyClick: (Long, String) -> Unit) {
-    // [New Logic] 展开/收起状态
+fun CommentGroupItem(
+    group: CommentGroup,
+    onReplyClick: (Long, String, String) -> Unit // [Modified] 增加 avatar 参数
+) {
     var isExpanded by remember { mutableStateOf(false) }
     val replyCount = group.replies.size
-    val previewCount = 2 // 默认展示2条
+    val previewCount = 2
 
     Column {
         SingleCommentRow(group.root, false, onReplyClick)
 
         if (replyCount > 0) {
             Column(Modifier.padding(start = 32.dp)) {
-                // 如果未展开，只显示 previewCount 条；否则显示全部
                 val displayReplies = if (isExpanded) group.replies else group.replies.take(previewCount)
 
                 displayReplies.forEach {
                     SingleCommentRow(it, true, onReplyClick)
                 }
 
-                // 按钮显示逻辑：只有回复数超过预览数时才显示
                 if (replyCount > previewCount) {
                     TextButton(
                         onClick = { isExpanded = !isExpanded },
-                        // 去除默认Padding以便左对齐
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                         modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
                     ) {
@@ -398,11 +426,10 @@ fun CommentGroupItem(group: CommentGroup, onReplyClick: (Long, String) -> Unit) 
 fun SingleCommentRow(
     comment: CommentDto,
     isReply: Boolean,
-    onReplyClick: (Long, String) -> Unit
+    onReplyClick: (Long, String, String) -> Unit // [Modified] 增加 avatar 参数
 ) {
     val name = comment.userName ?: "User ${comment.userId}"
 
-    // [Logic Update] 评论区头像逻辑
     val avatar = remember(comment.userAvatar, comment.userId) {
         if (comment.userAvatar.isNullOrBlank()) {
             "https://api.dicebear.com/7.x/avataaars/png?seed=${comment.userId}"
@@ -414,7 +441,8 @@ fun SingleCommentRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onReplyClick(comment.id, name) }
+            // [Modified] 点击时传递 avatar
+            .clickable { onReplyClick(comment.id, name, avatar) }
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         AsyncImage(
