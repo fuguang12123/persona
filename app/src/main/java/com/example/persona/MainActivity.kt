@@ -149,10 +149,6 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
                                 label = { Text(screen.title) },
                                 selected = isSelected,
                                 onClick = {
-                                    // ✅ [Fix] 修复导航逻辑：
-                                    // 1. 对于 CreatePost 这种带参数的路由，必须使用 createRoute() 生成 clean route ("create_post")，
-                                    //    而不是直接使用带花括号的 pattern ("create_post?personaId={personaId}")
-                                    // 2. 其他不带参数的页面可以直接使用 screen.route
                                     val targetRoute = if (screen == Screen.CreatePost) {
                                         Screen.CreatePost.createRoute()
                                     } else {
@@ -160,9 +156,23 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
                                     }
 
                                     navController.navigate(targetRoute) {
-                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        // ✅ [Core Fix] 实现点击 Tab 总是重置到初始界面
+
+                                        // 1. 弹出到起始页（清除栈）：保证栈的层级不会无限堆叠
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            // 2. saveState = false (关键点)：
+                                            // 离开当前 Tab 时，直接销毁它的状态和子页面（例如 ChatDetail）。
+                                            // 这样下次回来时，它是全新的。
+                                            saveState = false
+                                        }
+
+                                        // 3. 避免同一个页面被多次压入栈顶
                                         launchSingleTop = true
-                                        restoreState = true
+
+                                        // 4. restoreState = false (关键点)：
+                                        // 进入目标 Tab 时，不要尝试恢复之前的状态。
+                                        // 强制重新加载该 Tab 的初始页面。
+                                        restoreState = false
                                     }
                                 },
                                 colors = NavigationBarItemDefaults.colors(
@@ -176,7 +186,7 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
         ) { innerPadding ->
             NavHost(
                 navController = navController,
-                startDestination = startDestination!!, // ✅ [New] 使用动态计算的起始页
+                startDestination = startDestination!!,
                 modifier = Modifier.padding(innerPadding)
             ) {
                 composable(Screen.Login.route) {
@@ -196,11 +206,9 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
                     )
                 }
 
-                // ✅ [Fix] 这里的 ChatListScreen 配置了点击跳转到 ChatScreen
                 composable(Screen.ChatList.route) {
                     ChatListScreen(
                         onChatClick = { pid ->
-                            // 跳转到对话详情
                             navController.navigate(Screen.Chat.createRoute(pid))
                         },
                         onNotificationClick = { navController.navigate(Screen.Notification.route) }
@@ -260,7 +268,6 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
                     CreatePersonaScreen(onBack = { navController.popBackStack() })
                 }
 
-                // 对话界面路由
                 composable(route = Screen.Chat.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType })) {
                     val id = it.arguments?.getLong("personaId") ?: 0L
                     ChatScreen(
