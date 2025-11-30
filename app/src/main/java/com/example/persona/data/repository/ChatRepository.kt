@@ -203,28 +203,51 @@ class ChatRepository @Inject constructor(
         }
     }
 
-    // ... sendAudioMessage, getCurrentUserId 等保持不变 ...
     suspend fun sendAudioMessage(personaId: Long, audioFile: File, duration: Int) {
         val userId = getCurrentUserId() ?: return
         val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(Date())
+
+        // 1. 创建并插入本地临时消息 (Status=0 Sending)
         val tempUserMsg = ChatMessageEntity(
             userId = userId, personaId = personaId, role = "user",
             content = "[语音]", createdAt = timestamp, status = 0, msgType = 2, duration = duration, localFilePath = audioFile.absolutePath
         )
-        val localId = chatDao.insertMessage(tempUserMsg)
+        val localId = chatDao.insertMessage(tempUserMsg) // 获取本地 Room 生成的 ID
+
         try {
+            // 2. 发起网络请求
             val requestFile = audioFile.asRequestBody("audio/wav".toMediaTypeOrNull())
             val filePart = MultipartBody.Part.createFormData("file", audioFile.name, requestFile)
             val userIdPart = userId.toString().toRequestBody("text/plain".toMediaTypeOrNull())
             val personaIdPart = personaId.toString().toRequestBody("text/plain".toMediaTypeOrNull())
             val durationPart = duration.toString().toRequestBody("text/plain".toMediaTypeOrNull())
+
             val response = api.sendAudio(filePart, userIdPart, personaIdPart, durationPart)
+
             if (response.isSuccess() && response.data != null) {
-                chatDao.updateMessage(tempUserMsg.copy(id = localId, status = 2))
-                chatDao.insertMessage(response.data.toEntity())
+                // ✅ [Fixed] 成功后：
+                // A. 将本地临时消息删除
+                // B. 插入服务端返回的正式消息
+                // C. 重要：把本地的 localFilePath 复制给正式消息，避免 UI 重新下载音频
+
+                val serverMsgEntity = response.data.toEntity().copy(
+                    localFilePath = audioFile.absolutePath, // 继承本地路径
+                    status = 2 // 确保是成功状态
+                )
+
+                // 使用 ChatDao 的事务方法或手动执行删除+插入
+                chatDao.replaceLocalWithServerMessage(
+                    localMsg = tempUserMsg.copy(id = localId),
+                    serverMsg = serverMsgEntity
+                )
+
+                // 触发一次刷新以获取可能的 AI 回复 (如果 sendAudio 接口没返回 AI 回复的话)
                 refreshHistory(personaId)
-            } else { throw Exception("Server error") }
+            } else {
+                throw Exception("Server error")
+            }
         } catch (e: Exception) {
+            // 失败：更新本地消息状态为 3 (Failed)
             chatDao.updateMessage(tempUserMsg.copy(id = localId, status = 3))
         }
     }

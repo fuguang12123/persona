@@ -26,7 +26,8 @@ object NetworkModule {
         get() {
             val port = "8080"
             // 检测是否在模拟器上运行
-            val isEmulator = android.os.Build.FINGERPRINT.startsWith("generic") 
+            val isEmulator = android.os.Build.FINGERPRINT.startsWith("" +
+                    "generic")
                     || android.os.Build.FINGERPRINT.startsWith("unknown")
                     || android.os.Build.MODEL.contains("google_sdk")
                     || android.os.Build.MODEL.contains("Emulator")

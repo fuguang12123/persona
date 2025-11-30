@@ -149,7 +149,17 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
                                 label = { Text(screen.title) },
                                 selected = isSelected,
                                 onClick = {
-                                    navController.navigate(screen.route) {
+                                    // ✅ [Fix] 修复导航逻辑：
+                                    // 1. 对于 CreatePost 这种带参数的路由，必须使用 createRoute() 生成 clean route ("create_post")，
+                                    //    而不是直接使用带花括号的 pattern ("create_post?personaId={personaId}")
+                                    // 2. 其他不带参数的页面可以直接使用 screen.route
+                                    val targetRoute = if (screen == Screen.CreatePost) {
+                                        Screen.CreatePost.createRoute()
+                                    } else {
+                                        screen.route
+                                    }
+
+                                    navController.navigate(targetRoute) {
                                         popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                         launchSingleTop = true
                                         restoreState = true
@@ -185,12 +195,18 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
                         }
                     )
                 }
+
+                // ✅ [Fix] 这里的 ChatListScreen 配置了点击跳转到 ChatScreen
                 composable(Screen.ChatList.route) {
                     ChatListScreen(
-                        onChatClick = { pid -> navController.navigate(Screen.Chat.createRoute(pid)) },
+                        onChatClick = { pid ->
+                            // 跳转到对话详情
+                            navController.navigate(Screen.Chat.createRoute(pid))
+                        },
                         onNotificationClick = { navController.navigate(Screen.Notification.route) }
                     )
                 }
+
                 composable(Screen.Notification.route) {
                     NotificationScreen(
                         onBackClick = { navController.popBackStack() },
@@ -243,10 +259,17 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
                 composable(route = Screen.CreatePersona.route, arguments = listOf(navArgument("editId") { type = NavType.LongType; defaultValue = -1L })) {
                     CreatePersonaScreen(onBack = { navController.popBackStack() })
                 }
+
+                // 对话界面路由
                 composable(route = Screen.Chat.route, arguments = listOf(navArgument("personaId") { type = NavType.LongType })) {
                     val id = it.arguments?.getLong("personaId") ?: 0L
-                    ChatScreen(personaId = id, onBack = { navController.popBackStack() }, onPersonaDetailClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) })
+                    ChatScreen(
+                        personaId = id,
+                        onBack = { navController.popBackStack() },
+                        onPersonaDetailClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) }
+                    )
                 }
+
                 composable(route = Screen.PostDetail.route, arguments = listOf(navArgument("postId") { type = NavType.LongType })) {
                     val id = it.arguments?.getLong("postId") ?: 0L
                     PostDetailScreen(postId = id, onBack = { navController.popBackStack() }, onPersonaClick = { pid -> navController.navigate(Screen.PersonaDetail.createRoute(pid)) })
