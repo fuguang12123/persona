@@ -369,7 +369,7 @@ class LocalLLMService @Inject constructor(
 ### 克隆项目
 
 ```bash
-git clone 
+git clone https://github.com/fuguang12123/persona.git
 cd Persona
 ```
 
