@@ -89,7 +89,7 @@ class ChatRepository @Inject constructor(
         } catch (e: Exception) { Log.e("ChatRepo", "Refresh failed: ${e.message}") }
     }
 
-    // [New] 核心去重逻辑
+    // [New] 核心去重逻辑 - 已修复 AI 回复重复问题
     private suspend fun mergeAndSyncMessages(localMsgs: List<ChatMessageEntity>, serverMsgs: List<ChatMessageEntity>) {
         val toInsert = mutableListOf<ChatMessageEntity>()
         val toDelete = mutableListOf<ChatMessageEntity>()
@@ -102,32 +102,54 @@ class ChatRepository @Inject constructor(
             val isExactMatch = localMsgs.any { it.id == serverMsg.id }
 
             if (!isExactMatch) {
-                // ID 不一致，说明可能是新消息，或者是我们本地刚发出去的 (ID=0) 尚未同步的消息
+                // ID 不一致，可能是新消息，或者本地存在的"影子"消息（ID不同但内容相同）
+
+                // 1. 处理 USER 消息的去重 (原有的逻辑)
                 if (serverMsg.role == "user") {
-                    // 尝试寻找内容相同、但 ID 不同的本地消息 (这就是那个"重复的影子")
                     val duplicateLocal = localMsgs.firstOrNull { local ->
                         local.role == "user" &&
                                 local.content == serverMsg.content &&
-                                local.id != serverMsg.id && // ID 不同
-                                local.id !in matchedLocalIds && // 还没被匹配过
-                                local.status != 3 // 不是发送失败的消息
+                                local.id != serverMsg.id &&
+                                local.id !in matchedLocalIds &&
+                                local.status != 3
                     }
 
                     if (duplicateLocal != null) {
-                        // 找到了！这个 local 就是我们要删掉的替身
                         toDelete.add(duplicateLocal)
                         matchedLocalIds.add(duplicateLocal.id)
                     }
                 }
+
+                // 2. [新增] 处理 ASSISTANT (AI) 消息的去重
+                // 解决场景：sendMessage 插入了 AI 回复(ID可能不准)，refreshHistory 又拉取了同一条(真实ID)
+                else if (serverMsg.role == "assistant") {
+                    val duplicateLocal = localMsgs.firstOrNull { local ->
+                        local.role == "assistant" &&
+                                local.content == serverMsg.content && // 内容相同
+                                local.id != serverMsg.id &&           // ID 不同
+                                local.id !in matchedLocalIds          // 未被匹配过
+                        // 这里不需要检查 status，因为 AI 消息通常直接是 status=2
+                    }
+
+                    if (duplicateLocal != null) {
+                        // 找到了本地那个 ID 不对的替身，删掉它
+                        toDelete.add(duplicateLocal)
+                        matchedLocalIds.add(duplicateLocal.id)
+                    }
+                }
+
                 // 无论如何，把服务器的真消息插进去
                 toInsert.add(serverMsg)
             } else {
                 // 已经有了，覆盖更新一下以防万一
                 toInsert.add(serverMsg)
+                // 同时也标记这个 ID 已被匹配，防止误判
+                matchedLocalIds.add(serverMsg.id)
             }
         }
 
-        // 批量执行数据库操作
+        // 建议：将删除和插入操作放在同一个事务中执行，避免 UI 闪烁
+        // 这里分开写在逻辑上是没问题的，只要 ViewModel 观察的是 Flow
         if (toDelete.isNotEmpty()) {
             toDelete.forEach { chatDao.deleteMessage(it) }
         }

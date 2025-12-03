@@ -156,7 +156,6 @@ fun MainAppScreen(sessionManager: SessionManager, mainViewModel: MainViewModel) 
                                     }
 
                                     navController.navigate(targetRoute) {
-                                        // ✅ [Core Fix] 实现点击 Tab 总是重置到初始界面
 
                                         // 1. 弹出到起始页（清除栈）：保证栈的层级不会无限堆叠
                                         popUpTo(navController.graph.findStartDestination().id) {

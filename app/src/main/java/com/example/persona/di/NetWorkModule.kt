@@ -25,23 +25,10 @@ object NetworkModule {
     private val BASE_URL: String
         get() {
             val port = "8080"
-            // 检测是否在模拟器上运行
-            val isEmulator = android.os.Build.FINGERPRINT.startsWith("" +
-                    "generic")
-                    || android.os.Build.FINGERPRINT.startsWith("unknown")
-                    || android.os.Build.MODEL.contains("google_sdk")
-                    || android.os.Build.MODEL.contains("Emulator")
-                    || android.os.Build.MODEL.contains("Android SDK built for x86")
-                    || android.os.Build.MANUFACTURER.contains("Genymotion")
-                    || (android.os.Build.BRAND.startsWith("generic") && android.os.Build.DEVICE.startsWith("generic"))
-                    || "google_sdk" == android.os.Build.PRODUCT
-            
-            // 模拟器用 10.0.2.2，真机用 localhost
-            return if (isEmulator) {
-                "http://10.0.2.2:$port/"
-            } else {
-                "http://localhost:$port/"
-            }
+
+
+            return "http://111.228.53.151:$port/"
+
         }
 
 
