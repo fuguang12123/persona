@@ -85,6 +85,9 @@ fun ChatScreen(
     val playingUrl by viewModel.audioPlayer.currentPlayingUrl.collectAsState()
     var showMemoryDialog by remember { mutableStateOf(false) }
 
+    // [New] 监听录音音量 (用于 Overlay 动画)
+    val voiceAmplitude by viewModel.voiceAmplitude.collectAsState(initial = 0f)
+
     // 监听列表滚动，实现"加载更多"
     val isAtTop by remember {
         derivedStateOf {
@@ -106,7 +109,6 @@ fun ChatScreen(
         viewModel.uiEvent.collect { event ->
             when (event) {
                 ChatUiEvent.ScrollToBottom -> {
-                    // 因为 LazyColumn 是 reverseLayout = true，所以 Index 0 就是底部
                     listState.animateScrollToItem(0)
                 }
             }
@@ -117,7 +119,6 @@ fun ChatScreen(
         viewModel.initChat(personaId)
     }
 
-    // [保留] 自动吸底逻辑 (当已经在底部附近时，有新消息自动吸附)
     LaunchedEffect(viewModel.messages.size, viewModel.isSending) {
         if (viewModel.messages.isNotEmpty() && listState.firstVisibleItemIndex < 2) {
             listState.animateScrollToItem(0)
@@ -156,127 +157,137 @@ fun ChatScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        viewModel.personaName?.let { Text(it) }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val color = if (viewModel.isPrivateMode) Color(0xFF4CAF50) else Color.Gray
-                            Icon(
-                                imageVector = if (viewModel.isPrivateMode) Icons.Default.Lock else Icons.Default.Cloud,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp),
-                                tint = color
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                text = if (viewModel.isPrivateMode) "端侧私密模式" else "云端模式",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = color
-                            )
+    // [Modified] 使用 Box 包裹 Scaffold，以便在最顶层覆盖 Overlay
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            viewModel.personaName?.let { Text(it) }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val color = if (viewModel.isPrivateMode) Color(0xFF4CAF50) else Color.Gray
+                                Icon(
+                                    imageVector = if (viewModel.isPrivateMode) Icons.Default.Lock else Icons.Default.Cloud,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = color
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = if (viewModel.isPrivateMode) "端侧私密模式" else "云端模式",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = color
+                                )
+                            }
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                },
-                actions = {
-                    if (viewModel.isPrivateMode) {
-                        IconButton(onClick = { showMemoryDialog = true }) {
-                            Icon(Icons.Default.Face, "Memory", tint = MaterialTheme.colorScheme.primary)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                    },
+                    actions = {
+                        if (viewModel.isPrivateMode) {
+                            IconButton(onClick = { showMemoryDialog = true }) {
+                                Icon(Icons.Default.Face, "Memory", tint = MaterialTheme.colorScheme.primary)
+                            }
                         }
+                        Switch(
+                            checked = viewModel.isPrivateMode,
+                            onCheckedChange = { viewModel.togglePrivateMode() },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF4CAF50))
+                        )
+                        IconButton(onClick = { onPersonaDetailClick(personaId) }) { Icon(Icons.Default.Info, "Detail") }
                     }
-                    Switch(
-                        checked = viewModel.isPrivateMode,
-                        onCheckedChange = { viewModel.togglePrivateMode() },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF4CAF50))
-                    )
-                    IconButton(onClick = { onPersonaDetailClick(personaId) }) { Icon(Icons.Default.Info, "Detail") }
+                )
+            },
+            bottomBar = {
+                ChatInputArea(
+                    viewModel = viewModel, // [Modified] 传递 ViewModel
+                    onSendText = { text -> viewModel.sendMessage(text) },
+                    onSendImageGen = { text -> viewModel.sendImageGenRequest(text) },
+                    onStartRecording = { viewModel.startRecording() },
+                    onStopRecording = { viewModel.stopRecording() },
+                    onCancelRecording = { viewModel.cancelRecording() }
+                )
+            }
+        ) { padding ->
+
+            val displayMessages = if (viewModel.isPrivateMode) {
+                viewModel.messages.sortedBy { it.id }
+            } else {
+                viewModel.messages
+            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                state = listState,
+                reverseLayout = true,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(vertical = 16.dp)
+            ) {
+                val showCloudLoading = viewModel.isSending &&
+                        !viewModel.isPrivateMode &&
+                        (displayMessages.isEmpty() || displayMessages.firstOrNull()?.role == "user")
+
+                if (showCloudLoading) {
+                    item {
+                        ChatBubble(
+                            msg = ChatMessage(role = "assistant", status = 1, content = ""),
+                            personaAvatarUrl = viewModel.personaAvatarUrl,
+                            personaName = viewModel.personaName,
+                            userAvatarUrl = viewModel.userAvatarUrl,
+                            userName = viewModel.currentUserName,
+                            onAvatarClick = { },
+                            isPlaying = false,
+                            onPlayAudio = { }
+                        )
+                    }
                 }
-            )
-        },
-        bottomBar = {
-            ChatInputArea(
-                onSendText = { text -> viewModel.sendMessage(text) },
-                onSendImageGen = { text -> viewModel.sendImageGenRequest(text) },
-                onStartRecording = { viewModel.startRecording() },
-                onStopRecording = { viewModel.stopRecording() },
-                onCancelRecording = { viewModel.cancelRecording() },
-                isRecording = viewModel.isRecording,
-                isSending = viewModel.isSending,
-                isPrivateMode = viewModel.isPrivateMode
-            )
-        }
-    ) { padding ->
 
-        val displayMessages = if (viewModel.isPrivateMode) {
-            viewModel.messages.sortedBy { it.id }
-        } else {
-            viewModel.messages
-        }
-
-        LazyColumn(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            state = listState,
-            reverseLayout = true,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(vertical = 16.dp)
-        ) {
-            val showCloudLoading = viewModel.isSending &&
-                    !viewModel.isPrivateMode &&
-                    (displayMessages.isEmpty() || displayMessages.firstOrNull()?.role == "user")
-
-            if (showCloudLoading) {
-                item {
+                items(items = displayMessages, key = { it.id }) { msg ->
                     ChatBubble(
-                        msg = ChatMessage(role = "assistant", status = 1, content = ""),
+                        msg = msg,
                         personaAvatarUrl = viewModel.personaAvatarUrl,
                         personaName = viewModel.personaName,
                         userAvatarUrl = viewModel.userAvatarUrl,
                         userName = viewModel.currentUserName,
-                        onAvatarClick = { },
-                        isPlaying = false,
-                        onPlayAudio = { }
+                        onAvatarClick = { onPersonaDetailClick(personaId) },
+                        isPlaying = playingUrl == (msg.localFilePath ?: msg.mediaUrl),
+                        onPlayAudio = { path -> viewModel.playAudio(path) }
                     )
                 }
             }
+        }
 
-            items(items = displayMessages, key = { it.id }) { msg ->
-                ChatBubble(
-                    msg = msg,
-                    personaAvatarUrl = viewModel.personaAvatarUrl,
-                    personaName = viewModel.personaName,
-                    userAvatarUrl = viewModel.userAvatarUrl,
-                    userName = viewModel.currentUserName,
-                    onAvatarClick = { onPersonaDetailClick(personaId) },
-                    isPlaying = playingUrl == (msg.localFilePath ?: msg.mediaUrl),
-                    onPlayAudio = { path -> viewModel.playAudio(path) }
-                )
-            }
+        // [New] 录音 Overlay，显示在最顶层
+        if (viewModel.isRecording) {
+            VoiceRecordingOverlay(
+                isCancelling = viewModel.isVoiceCancelling,
+                amplitude = voiceAmplitude
+            )
         }
     }
 }
 
-// ... 下面的 ChatInputArea, ChatBubble 等组件保持不变，可以直接复用之前的代码 ...
 @Composable
 fun ChatInputArea(
+    viewModel: ChatViewModel, // [Modified] 接收 ViewModel
     onSendText: (String) -> Unit,
     onSendImageGen: (String) -> Unit,
     onStartRecording: () -> Boolean,
     onStopRecording: () -> Unit,
-    onCancelRecording: () -> Unit,
-    isRecording: Boolean,
-    isSending: Boolean,
-    isPrivateMode: Boolean
+    onCancelRecording: () -> Unit
 ) {
     var text by remember { mutableStateOf("") }
     var isVoiceMode by remember { mutableStateOf(false) }
     var isImageMode by remember { mutableStateOf(false) }
+
+    // 状态直接从 ViewModel 获取
+    val isSending = viewModel.isSending
+    val isPrivateMode = viewModel.isPrivateMode
 
     Column(
         modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
@@ -329,7 +340,13 @@ fun ChatInputArea(
 
             if (isVoiceMode && !isPrivateMode) {
                 Box(Modifier.weight(1f)) {
-                    VoiceInputButton(onStartRecording, onStopRecording, onCancelRecording, isRecording)
+                    // [Modified] 使用重构后的 VoiceInputButton，传入 ViewModel
+                    VoiceInputButton(
+                        viewModel = viewModel,
+                        onStartRecording = onStartRecording,
+                        onStopRecording = onStopRecording,
+                        onCancelRecording = onCancelRecording
+                    )
                 }
             } else {
                 OutlinedTextField(
@@ -368,6 +385,7 @@ fun ChatInputArea(
     }
 }
 
+// ... ChatBubble 和 ChatAvatar 保持不变 ...
 @Composable
 fun ChatBubble(
     msg: ChatMessage,

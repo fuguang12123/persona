@@ -31,7 +31,7 @@ import java.util.Collections
 import java.util.Locale
 import javax.inject.Inject
 
-// [New] 定义 UI 事件
+// 定义 UI 事件
 sealed interface ChatUiEvent {
     data object ScrollToBottom : ChatUiEvent
 }
@@ -55,13 +55,21 @@ class ChatViewModel @Inject constructor(
     var userAvatarUrl by mutableStateOf("")
     var currentUserName by mutableStateOf("User")
     private var currentPersonaId: Long = 0
-    var isRecording by mutableStateOf(false)
-        private set
+
     var isPrivateMode by mutableStateOf(false)
     var memories: Flow<List<UserMemoryEntity>> = emptyFlow()
 
+    // --- 语音相关 State [Modified] ---
+    var isRecording by mutableStateOf(false)
+        private set
+
+    // [New] 是否处于"松开取消"的状态 (手指滑到了上方区域)
+    var isVoiceCancelling by mutableStateOf(false)
+
+    // [New] 暴露录音时的音量振幅 (0f ~ 1f)，用于驱动波纹动画
+    val voiceAmplitude = audioRecorder.amplitude
+
     // --- UI Events ---
-    // [New] 使用 Channel 发送一次性 UI 事件 (如滚动)
     private val _uiEvent = Channel<ChatUiEvent>()
     val uiEvent = _uiEvent.receiveAsFlow()
 
@@ -73,9 +81,7 @@ class ChatViewModel @Inject constructor(
     private val animatingMessageIds = Collections.synchronizedSet(mutableSetOf<Long>())
     private var isInitialLoad = true
 
-    // 记录 ViewModel 初始化时间戳
     private val viewInitTime = System.currentTimeMillis()
-
     private var messagesJob: Job? = null
 
     init {
@@ -217,8 +223,6 @@ class ChatViewModel @Inject constructor(
     private fun startTypewriter(msg: ChatMessage) {
         typedMessageIds.add(msg.id)
         animatingMessageIds.add(msg.id)
-
-        // [New] AI 开始回复时，强制滚动到底部
         viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
 
         viewModelScope.launch {
@@ -251,10 +255,7 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         isSending = true
-
-        // [New] 用户点击发送时，立即滚动到底部
         viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
-
         viewModelScope.launch {
             chatRepository.sendMessage(currentPersonaId, text, false, isPrivateMode)
             isSending = false
@@ -264,10 +265,7 @@ class ChatViewModel @Inject constructor(
     fun sendImageGenRequest(text: String) {
         if (text.isBlank()) return
         isSending = true
-
-        // [New] 滚动
         viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
-
         viewModelScope.launch {
             chatRepository.sendMessage(currentPersonaId, text, true, false)
             isSending = false
@@ -275,6 +273,8 @@ class ChatViewModel @Inject constructor(
     }
 
     fun startRecording(): Boolean {
+        // [Modified] 开始录音时，重置取消状态
+        isVoiceCancelling = false
         val success = audioRecorder.startRecording()
         if (success) isRecording = true
         return success
@@ -282,15 +282,16 @@ class ChatViewModel @Inject constructor(
 
     fun stopRecording() {
         isRecording = false
+        // [New] 停止录音时也重置取消状态
+        isVoiceCancelling = false
         viewModelScope.launch {
             val result = audioRecorder.stopRecording()
             if (result != null) {
                 val (file, duration) = result
+                // [Modified] 增加一个极短语音过滤，防止误触
                 if (duration >= 1) {
                     isSending = true
-                    // [New] 语音发送时滚动
                     _uiEvent.send(ChatUiEvent.ScrollToBottom)
-
                     try {
                         chatRepository.sendAudioMessage(currentPersonaId, file, duration)
                     } finally { isSending = false }
@@ -299,6 +300,11 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun cancelRecording() { isRecording = false; audioRecorder.cancelRecording() }
+    fun cancelRecording() {
+        isRecording = false
+        isVoiceCancelling = false
+        audioRecorder.cancelRecording()
+    }
+
     fun playAudio(url: String) { audioPlayer.play(url) }
 }

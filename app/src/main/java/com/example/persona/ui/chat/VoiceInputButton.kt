@@ -6,59 +6,56 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Undo
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 
+/**
+ * 极速响应版语音按钮
+ * 使用底层 pointerInput 实现"按下即录"，消除 detectDragGestures 的启动延迟。
+ */
 @Composable
 fun VoiceInputButton(
+    viewModel: ChatViewModel,
     onStartRecording: () -> Boolean,
     onStopRecording: () -> Unit,
-    onCancelRecording: () -> Unit,
-    isRecording: Boolean
+    onCancelRecording: () -> Unit
 ) {
     val context = LocalContext.current
-    var isCancelling by remember { mutableStateOf(false) } // 是否处于“松开取消”区域
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+
+    // 从 ViewModel 获取状态
+    val isRecording = viewModel.isRecording
+    val isCancelling = viewModel.isVoiceCancelling
 
     // 权限请求启动器
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            Toast.makeText(context, "权限已获取，请再次按住说话", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(context, "需要录音权限才能发送语音", Toast.LENGTH_SHORT).show()
-        }
+    ) { isGranted ->
+        if (isGranted) Toast.makeText(context, "权限获取成功，请再次按住说话", Toast.LENGTH_SHORT).show()
     }
+
+    // 触发取消的阈值 (上滑 100dp)
+    val cancelThreshold = with(density) { -100.dp.toPx() }
 
     Box(
         modifier = Modifier
@@ -67,91 +64,75 @@ fun VoiceInputButton(
             .clip(RoundedCornerShape(24.dp))
             .background(if (isRecording) Color.LightGray else MaterialTheme.colorScheme.surfaceVariant)
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        // 1. 检查权限
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                            != PackageManager.PERMISSION_GRANTED) {
-                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            return@detectTapGestures
-                        }
+                awaitEachGesture {
+                    // 1. 等待第一根手指按下 (ACTION_DOWN)，零延迟
+                    val down = awaitFirstDown(requireUnconsumed = false)
 
-                        // 2. 开始录音
-                        val started = onStartRecording()
-                        if (started) {
-                            try {
-                                isCancelling = false
-                                awaitRelease() // 等待手指抬起
-                            } finally {
-                                // 3. 手指抬起后的逻辑
-                                if (isCancelling) {
-                                    onCancelRecording()
-                                } else {
-                                    onStopRecording()
+                    // 权限检查前置
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        return@awaitEachGesture
+                    }
+
+                    // 2. 立即触发录音
+                    val started = onStartRecording()
+
+                    if (started) {
+                        // 震动反馈：告知用户录音开始
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+
+                        var isCancelState = false
+
+                        // 3. 循环监听移动事件 (ACTION_MOVE)
+                        do {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.lastOrNull()
+
+                            if (change != null && change.pressed) {
+                                // 计算 Y 轴偏移 (相对于按钮组件左上角)
+                                // 向上滑 Y 会变小 (负数)
+                                val currentY = change.position.y
+
+                                // 判断是否进入取消区域
+                                val newCancelState = currentY < cancelThreshold
+
+                                // 状态去抖动：只有状态真正改变时才更新，防止边缘反复跳变
+                                if (newCancelState != isCancelState) {
+                                    isCancelState = newCancelState
+                                    viewModel.isVoiceCancelling = isCancelState
+
+                                    // 状态切换震动反馈
+                                    if (isCancelState) {
+                                        // 进入取消区：明显震动
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    } else {
+                                        // 回到录音区：轻微震动
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
                                 }
                             }
+                        } while (event.changes.any { it.pressed })
+
+                        // 4. 手指抬起 (ACTION_UP) 或 事件取消
+                        // 再次读取最新的状态 (循环结束后 isCancelState 可能不是最新的，以 ViewModel 为准或使用局部变量)
+                        if (isCancelState) {
+                            onCancelRecording()
+                        } else {
+                            onStopRecording()
                         }
+
+                        // 重置 ViewModel 状态
+                        viewModel.isVoiceCancelling = false
                     }
-                )
-            }
-            .pointerInput(Unit) {
-                // 检测拖拽，判断是否上滑取消
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { },
-                    onDragEnd = { },
-                    onDragCancel = { },
-                    onDrag = { change, dragAmount ->
-                        // Y轴向上偏移超过 50dp 视为取消
-                        // change.position 是相对于组件左上角的坐标，负数表示向上
-                        // 这里的逻辑简化处理：判断 Y 坐标是否小于 -100 (向上滑出按钮一定距离)
-                        isCancelling = change.position.y < -100f
-                    }
-                )
+                }
             },
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = if (isRecording) (if (isCancelling) "松开取消" else "松开发送") else "按住 说话",
+            text = if (isCancelling) "松开取消" else if (isRecording) "松开发送" else "按住 说话",
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            color = if (isRecording) Color.Black else MaterialTheme.colorScheme.onSurface
         )
-    }
-
-    // 录音时的全屏 Overlay (类似微信中间那个弹窗)
-    if (isRecording) {
-        Dialog(
-            onDismissRequest = {},
-            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color.Transparent),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(180.dp)
-                        .background(
-                            color = if (isCancelling) Color.Red.copy(alpha = 0.8f) else Color.Black.copy(alpha = 0.7f),
-                            shape = RoundedCornerShape(16.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = if (isCancelling) Icons.Default.Undo else Icons.Default.Mic,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(64.dp)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = if (isCancelling) "松开手指，取消发送" else "手指上滑，取消发送",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-            }
-        }
     }
 }
