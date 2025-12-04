@@ -49,6 +49,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +69,10 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.persona.data.model.ChatMessage
 
+/**
+ * ChatScreen: 聊天主界面
+ * 包含：消息列表 (LazyColumn)、输入区域 (ChatInputArea)、顶部导航栏 (TopAppBar)
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -78,71 +83,76 @@ fun ChatScreen(
 ) {
     val listState = rememberLazyListState()
     val playingUrl by viewModel.audioPlayer.currentPlayingUrl.collectAsState()
-
     var showMemoryDialog by remember { mutableStateOf(false) }
+
+    // 监听列表滚动，实现"加载更多"
+    val isAtTop by remember {
+        derivedStateOf {
+            val visibleItems = listState.layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) return@derivedStateOf false
+            val lastVisibleItem = visibleItems.last()
+            lastVisibleItem.index >= listState.layoutInfo.totalItemsCount - 2
+        }
+    }
+
+    LaunchedEffect(isAtTop) {
+        if (isAtTop) {
+            viewModel.loadMoreMessages()
+        }
+    }
+
+    // [New] 监听 UI 事件 (滚动到底部)
+    LaunchedEffect(Unit) {
+        viewModel.uiEvent.collect { event ->
+            when (event) {
+                ChatUiEvent.ScrollToBottom -> {
+                    // 因为 LazyColumn 是 reverseLayout = true，所以 Index 0 就是底部
+                    listState.animateScrollToItem(0)
+                }
+            }
+        }
+    }
 
     LaunchedEffect(personaId) {
         viewModel.initChat(personaId)
     }
 
+    // [保留] 自动吸底逻辑 (当已经在底部附近时，有新消息自动吸附)
     LaunchedEffect(viewModel.messages.size, viewModel.isSending) {
-        if (viewModel.messages.isNotEmpty()) {
+        if (viewModel.messages.isNotEmpty() && listState.firstVisibleItemIndex < 2) {
             listState.animateScrollToItem(0)
         }
     }
 
     if (showMemoryDialog) {
         val memoryList by viewModel.memories.collectAsState(initial = emptyList())
-
         AlertDialog(
             onDismissRequest = { showMemoryDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Face,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                    Icon(Icons.Default.Face, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
                     Text("共生记忆库")
                 }
             },
             text = {
                 if (memoryList.isEmpty()) {
-                    Text(
-                        text = "暂时还没有提取到关于你的记忆...",
-                        fontStyle = FontStyle.Italic,
-                        color = Color.Gray
-                    )
+                    Text("暂时还没有提取到关于你的记忆...", fontStyle = FontStyle.Italic, color = Color.Gray)
                 } else {
                     LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                         items(memoryList) { memory ->
                             Column(Modifier.padding(vertical = 4.dp)) {
                                 Row(verticalAlignment = Alignment.Top) {
-                                    Text(
-                                        text = "• ",
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        text = memory.content,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
+                                    Text("• ", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    Text(memory.content, style = MaterialTheme.typography.bodyMedium)
                                 }
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(top = 4.dp),
-                                    color = Color.LightGray.copy(alpha = 0.5f)
-                                )
+                                HorizontalDivider(modifier = Modifier.padding(top = 4.dp), color = Color.LightGray.copy(alpha = 0.5f))
                             }
                         }
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showMemoryDialog = false }) {
-                    Text("关闭")
-                }
-            }
+            confirmButton = { TextButton(onClick = { showMemoryDialog = false }) { Text("关闭") } }
         )
     }
 
@@ -170,29 +180,20 @@ fun ChatScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                    }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
                 actions = {
                     if (viewModel.isPrivateMode) {
                         IconButton(onClick = { showMemoryDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Face,
-                                contentDescription = "Memory",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Icon(Icons.Default.Face, "Memory", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
-
                     Switch(
                         checked = viewModel.isPrivateMode,
                         onCheckedChange = { viewModel.togglePrivateMode() },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF4CAF50))
                     )
-                    IconButton(onClick = { onPersonaDetailClick(personaId) }) {
-                        Icon(Icons.Default.Info, "Detail")
-                    }
+                    IconButton(onClick = { onPersonaDetailClick(personaId) }) { Icon(Icons.Default.Info, "Detail") }
                 }
             )
         },
@@ -236,8 +237,8 @@ fun ChatScreen(
                         msg = ChatMessage(role = "assistant", status = 1, content = ""),
                         personaAvatarUrl = viewModel.personaAvatarUrl,
                         personaName = viewModel.personaName,
-                        userAvatarUrl = viewModel.userAvatarUrl, // Pass user info
-                        userName = viewModel.currentUserName,    // Pass user info
+                        userAvatarUrl = viewModel.userAvatarUrl,
+                        userName = viewModel.currentUserName,
                         onAvatarClick = { },
                         isPlaying = false,
                         onPlayAudio = { }
@@ -250,8 +251,8 @@ fun ChatScreen(
                     msg = msg,
                     personaAvatarUrl = viewModel.personaAvatarUrl,
                     personaName = viewModel.personaName,
-                    userAvatarUrl = viewModel.userAvatarUrl, // [New] Pass user avatar
-                    userName = viewModel.currentUserName,    // [New] Pass user name
+                    userAvatarUrl = viewModel.userAvatarUrl,
+                    userName = viewModel.currentUserName,
                     onAvatarClick = { onPersonaDetailClick(personaId) },
                     isPlaying = playingUrl == (msg.localFilePath ?: msg.mediaUrl),
                     onPlayAudio = { path -> viewModel.playAudio(path) }
@@ -261,6 +262,7 @@ fun ChatScreen(
     }
 }
 
+// ... 下面的 ChatInputArea, ChatBubble 等组件保持不变，可以直接复用之前的代码 ...
 @Composable
 fun ChatInputArea(
     onSendText: (String) -> Unit,
@@ -277,29 +279,20 @@ fun ChatInputArea(
     var isImageMode by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
     ) {
         if (!isVoiceMode && !isPrivateMode) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = if (isImageMode) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
                     border = if (!isImageMode) androidx.compose.foundation.BorderStroke(1.dp, Color.Gray) else null,
-                    modifier = Modifier
-                        .height(32.dp)
-                        .clickable { isImageMode = !isImageMode }
+                    modifier = Modifier.height(32.dp).clickable { isImageMode = !isImageMode }
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(modifier = Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Image,
                             contentDescription = "Image Gen",
@@ -316,10 +309,9 @@ fun ChatInputArea(
                 }
             }
         }
+
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (!isPrivateMode) {
@@ -376,14 +368,13 @@ fun ChatInputArea(
     }
 }
 
-// 底部辅助组件
 @Composable
 fun ChatBubble(
     msg: ChatMessage,
     personaAvatarUrl: String,
     personaName: String?,
-    userAvatarUrl: String, // [New] 参数
-    userName: String,      // [New] 参数
+    userAvatarUrl: String,
+    userName: String,
     onAvatarClick: () -> Unit,
     isPlaying: Boolean,
     onPlayAudio: (String) -> Unit
@@ -394,36 +385,24 @@ fun ChatBubble(
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Top
     ) {
-        // AI Avatar (左侧)
         if (!isUser) {
             Box(modifier = Modifier.clickable { onAvatarClick() }) {
                 ChatAvatar(url = personaAvatarUrl, name = personaName ?: "AI")
             }
             Spacer(modifier = Modifier.width(8.dp))
         }
-
         Surface(
             color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp
+                topStart = 16.dp, topEnd = 16.dp,
+                bottomStart = if (isUser) 16.dp else 4.dp, bottomEnd = if (isUser) 4.dp else 16.dp
             ),
             modifier = Modifier.widthIn(max = 280.dp)
         ) {
-            ChatMessageContent(
-                msg = msg,
-                isUser = isUser,
-                isPlaying = isPlaying,
-                onPlayAudio = onPlayAudio
-            )
+            ChatMessageContent(msg = msg, isUser = isUser, isPlaying = isPlaying, onPlayAudio = onPlayAudio)
         }
-
-        // User Avatar (右侧)
         if (isUser) {
             Spacer(modifier = Modifier.width(8.dp))
-            // [Modified] 使用传入的真实用户头像和昵称
             ChatAvatar(url = userAvatarUrl, name = userName)
         }
     }
@@ -432,29 +411,17 @@ fun ChatBubble(
 @Composable
 fun ChatAvatar(url: String, name: String) {
     val finalUrl = remember(url, name) {
-        // [Logic] 如果 url 为空，使用 DiceBear 生成基于昵称的头像
-        // 否则使用原图，并将 svg 替换为 png
-        if (url.isBlank()) {
-            "https://api.dicebear.com/7.x/avataaars/png?seed=$name"
-        } else {
-            url.replace("/svg", "/png")
-        }
+        if (url.isBlank()) "https://api.dicebear.com/7.x/avataaars/png?seed=$name" else url.replace("/svg", "/png")
     }
-
     Surface(
         modifier = Modifier.size(40.dp),
         shape = CircleShape,
         color = MaterialTheme.colorScheme.secondaryContainer
     ) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(finalUrl)
-                .crossfade(true)
-                .build(),
+            model = ImageRequest.Builder(LocalContext.current).data(finalUrl).crossfade(true).build(),
             contentDescription = "Avatar",
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape),
+            modifier = Modifier.fillMaxSize().clip(CircleShape),
             contentScale = ContentScale.Crop,
             placeholder = rememberVectorPainter(Icons.Default.Person),
             error = rememberVectorPainter(Icons.Default.Person)

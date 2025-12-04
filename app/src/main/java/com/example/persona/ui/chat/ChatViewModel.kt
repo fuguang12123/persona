@@ -16,76 +16,82 @@ import com.example.persona.data.service.LocalLLMService
 import com.example.persona.utils.AudioPlayerManager
 import com.example.persona.utils.AudioRecorderManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Collections
+import java.util.Locale
 import javax.inject.Inject
+
+// [New] 定义 UI 事件
+sealed interface ChatUiEvent {
+    data object ScrollToBottom : ChatUiEvent
+}
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val personaRepository: PersonaRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val authService: AuthService, // ✅ [New] 注入 AuthService 以获取网络数据
+    private val authService: AuthService,
     private val audioRecorder: AudioRecorderManager,
     val audioPlayer: AudioPlayerManager,
     private val localLLMService: LocalLLMService
 ) : ViewModel() {
 
-    // UI State
+    // --- UI State ---
     var messages by mutableStateOf<List<ChatMessage>>(emptyList())
     var isSending by mutableStateOf(false)
-
-    // AI 信息
     var personaName: String? by mutableStateOf("Chat")
     var personaAvatarUrl by mutableStateOf("")
-
-    // 用户信息
     var userAvatarUrl by mutableStateOf("")
     var currentUserName by mutableStateOf("User")
-
     private var currentPersonaId: Long = 0
     var isRecording by mutableStateOf(false)
         private set
-
     var isPrivateMode by mutableStateOf(false)
     var memories: Flow<List<UserMemoryEntity>> = emptyFlow()
 
+    // --- UI Events ---
+    // [New] 使用 Channel 发送一次性 UI 事件 (如滚动)
+    private val _uiEvent = Channel<ChatUiEvent>()
+    val uiEvent = _uiEvent.receiveAsFlow()
+
+    // --- Pagination ---
+    private val _messageLimit = MutableStateFlow(20)
+
+    // --- Typewriter State ---
     private val typedMessageIds = mutableSetOf<Long>()
+    private val animatingMessageIds = Collections.synchronizedSet(mutableSetOf<Long>())
     private var isInitialLoad = true
+
+    // 记录 ViewModel 初始化时间戳
+    private val viewInitTime = System.currentTimeMillis()
 
     private var messagesJob: Job? = null
 
     init {
-        // 1. 监听本地缓存 (UI 响应源)
         loadUserProfile()
-
-        // 2. [New] 异步从后端拉取最新数据并存入本地 (数据同步源)
         fetchRemoteUserProfile()
     }
 
     private fun loadUserProfile() {
-        // 监听头像
         viewModelScope.launch {
-            userPreferencesRepository.avatarUrl.collect { url ->
-                // ✅ Log 移到这里，这才是真正读到数据的时候
-                Log.d("ChatViewModel", "Flow update avatar: $url")
-                userAvatarUrl = url ?: ""
-            }
+            userPreferencesRepository.avatarUrl.collect { url -> userAvatarUrl = url ?: "" }
         }
-        // 监听昵称
         viewModelScope.launch {
-            userPreferencesRepository.userName.collect { name ->
-                currentUserName = name ?: "User"
-            }
+            userPreferencesRepository.userName.collect { name -> currentUserName = name ?: "User" }
         }
     }
 
-    /**
-     * [New] 从服务器获取个人信息并更新到本地存储
-     */
     private fun fetchRemoteUserProfile() {
         viewModelScope.launch {
             try {
@@ -93,41 +99,38 @@ class ChatViewModel @Inject constructor(
                 if (response.isSuccessful && response.body()?.code == 200) {
                     val userDto = response.body()?.data
                     if (userDto != null) {
-                        Log.d("ChatViewModel", "Remote fetch success: ${userDto.avatarUrl}")
-                        // ✅ 将网络数据写入 UserPreferencesRepository
-                        // 写入后，上面的 loadUserProfile 中的 Flow 会自动触发，更新 UI
-                        userPreferencesRepository.saveUserInfo(
-                            avatar = userDto.avatarUrl,
-                            name = userDto.nickname
-                        )
+                        userPreferencesRepository.saveUserInfo(avatar = userDto.avatarUrl, name = userDto.nickname)
                     }
-                } else {
-                    Log.w("ChatViewModel", "Remote fetch failed: ${response.code()}")
                 }
-            } catch (e: Exception) {
-                Log.e("ChatViewModel", "Remote fetch error", e)
-            }
+            } catch (e: Exception) { Log.e("ChatViewModel", "Remote fetch error", e) }
         }
     }
 
     fun initChat(personaId: Long) {
         currentPersonaId = personaId
         isInitialLoad = true
+        _messageLimit.value = 20
         loadMessages()
-
-        viewModelScope.launch {
-            memories = chatRepository.getMemoriesStream(personaId)
+        viewModelScope.launch { memories = chatRepository.getMemoriesStream(personaId) }
+        if (!isPrivateMode) {
+            viewModelScope.launch { chatRepository.refreshHistory(personaId) }
         }
-        viewModelScope.launch { chatRepository.refreshHistory(personaId) }
         loadPersonaInfo()
     }
 
-    // ... (以下所有方法保持不变) ...
+    fun loadMoreMessages() {
+        if (messages.size < _messageLimit.value) return
+        _messageLimit.value += 20
+    }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun loadMessages() {
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
-            chatRepository.getMessagesStream(currentPersonaId, isPrivateMode).collectLatest { entities ->
+            _messageLimit.flatMapLatest { limit ->
+                chatRepository.getMessagesStream(currentPersonaId, isPrivateMode, limit)
+            }.collectLatest { entities ->
+
                 if (isInitialLoad) {
                     entities.forEach {
                         if (!it.isUser && it.status == 2) typedMessageIds.add(it.id)
@@ -141,19 +144,27 @@ class ChatViewModel @Inject constructor(
                     entities.filter { !it.isUser && it.status == 2 }.maxByOrNull { it.id }
                 }
 
-                entities.filter { !it.isUser && it.status == 2 }.forEach { entity ->
-                    if (latestAiMsg == null || entity.id != latestAiMsg.id) {
-                        typedMessageIds.add(entity.id)
-                    }
-                }
+                val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
 
                 val newUiMessages = entities.map { entity ->
                     val isLatestAi = (latestAiMsg != null && entity.id == latestAiMsg.id)
+                    val isNewMessage = isMessageNewerThanInit(entity.createdAt, dateFormat)
+
                     val needsTyping = isLatestAi
                             && !typedMessageIds.contains(entity.id)
                             && !entity.content.isNullOrEmpty()
+                            && isNewMessage
 
-                    val displayContent = if (needsTyping) "" else entity.content
+                    val currentDisplayContent = messages.find { it.id == entity.id }?.displayContent
+                    val isAnimating = animatingMessageIds.contains(entity.id)
+
+                    val displayContent = if (isAnimating) {
+                        currentDisplayContent ?: ""
+                    } else if (needsTyping) {
+                        ""
+                    } else {
+                        entity.content
+                    }
 
                     ChatMessage(
                         id = entity.id,
@@ -174,6 +185,7 @@ class ChatViewModel @Inject constructor(
                     it.id == latestAiMsg?.id
                             && !typedMessageIds.contains(it.id)
                             && !it.content.isNullOrEmpty()
+                            && it.displayContent.isNullOrEmpty()
                 }?.let { msgToAnimate ->
                     startTypewriter(msgToAnimate)
                 }
@@ -181,34 +193,52 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    private fun isMessageNewerThanInit(timeStr: String, parser: SimpleDateFormat): Boolean {
+        return try {
+            val msgTime = parser.parse(timeStr)?.time ?: 0L
+            msgTime > (viewInitTime - 2000)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun togglePrivateMode() {
         isPrivateMode = !isPrivateMode
         isInitialLoad = true
+        _messageLimit.value = 20
         loadMessages()
-
         if (isPrivateMode) {
             viewModelScope.launch { localLLMService.initModel() }
+        } else {
+            viewModelScope.launch { chatRepository.refreshHistory(currentPersonaId) }
         }
     }
 
     private fun startTypewriter(msg: ChatMessage) {
         typedMessageIds.add(msg.id)
-        viewModelScope.launch {
-            val fullText = msg.content ?: ""
-            val delayTime = if (fullText.length > 50) 10L else 30L
+        animatingMessageIds.add(msg.id)
 
-            for (i in 1..fullText.length) {
-                kotlinx.coroutines.delay(delayTime)
-                updateMessageDisplayContent(msg.id, fullText.take(i))
+        // [New] AI 开始回复时，强制滚动到底部
+        viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
+
+        viewModelScope.launch {
+            try {
+                val fullText = msg.content ?: ""
+                val delayTime = if (fullText.length > 50) 10L else 30L
+                for (i in 1..fullText.length) {
+                    if (!animatingMessageIds.contains(msg.id)) break
+                    kotlinx.coroutines.delay(delayTime)
+                    updateMessageDisplayContent(msg.id, fullText.take(i))
+                }
+                updateMessageDisplayContent(msg.id, fullText)
+            } finally {
+                animatingMessageIds.remove(msg.id)
             }
-            updateMessageDisplayContent(msg.id, fullText)
         }
     }
 
     private fun updateMessageDisplayContent(msgId: Long, text: String) {
-        messages = messages.map {
-            if (it.id == msgId) it.copy(displayContent = text) else it
-        }
+        messages = messages.map { if (it.id == msgId) it.copy(displayContent = text) else it }
     }
 
     private fun loadPersonaInfo() {
@@ -221,6 +251,10 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         isSending = true
+
+        // [New] 用户点击发送时，立即滚动到底部
+        viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
+
         viewModelScope.launch {
             chatRepository.sendMessage(currentPersonaId, text, false, isPrivateMode)
             isSending = false
@@ -230,6 +264,10 @@ class ChatViewModel @Inject constructor(
     fun sendImageGenRequest(text: String) {
         if (text.isBlank()) return
         isSending = true
+
+        // [New] 滚动
+        viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
+
         viewModelScope.launch {
             chatRepository.sendMessage(currentPersonaId, text, true, false)
             isSending = false
@@ -250,6 +288,9 @@ class ChatViewModel @Inject constructor(
                 val (file, duration) = result
                 if (duration >= 1) {
                     isSending = true
+                    // [New] 语音发送时滚动
+                    _uiEvent.send(ChatUiEvent.ScrollToBottom)
+
                     try {
                         chatRepository.sendAudioMessage(currentPersonaId, file, duration)
                     } finally { isSending = false }

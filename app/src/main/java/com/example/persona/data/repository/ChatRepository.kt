@@ -39,19 +39,15 @@ class ChatRepository @Inject constructor(
     private val userPrefs: UserPreferencesRepository,
     private val localLLMService: LocalLLMService
 ) {
-    suspend fun getMessagesStream(personaId: Long, isPrivateMode: Boolean): Flow<List<ChatMessageEntity>> {
+
+    suspend fun getMessagesStream(personaId: Long, isPrivateMode: Boolean, limit: Int): Flow<List<ChatMessageEntity>> {
         val userId = getCurrentUserId() ?: return emptyFlow()
         val flow = if (isPrivateMode) {
-            chatDao.getPrivateChatHistory(userId, personaId)
+            chatDao.getPrivateChatHistory(userId, personaId, limit)
         } else {
-            chatDao.getCloudChatHistory(userId, personaId)
+            chatDao.getCloudChatHistory(userId, personaId, limit)
         }
-
-        // [Fix] 强制在内存中对结果进行排序，确保是最新的在前面 (DESC)
-        // 配合 UI 的 reverseLayout = true，实现最新的在底部
-        return flow.map { list ->
-            list.sortedByDescending { it.createdAt }
-        }
+        return flow.map { list -> list.sortedByDescending { it.createdAt } }
     }
 
     suspend fun getMemoriesStream(personaId: Long): Flow<List<UserMemoryEntity>> {
@@ -59,168 +55,146 @@ class ChatRepository @Inject constructor(
         return userMemoryDao.getAllMemories(userId, personaId)
     }
 
-    suspend fun syncConversationList() {
-        val userId = getCurrentUserId() ?: return
-        try {
-            val response = api.getConversations(userId)
-            if (response.isSuccess() && response.data != null) {
-                val list = response.data
-                val personas = list.map { dto -> PersonaEntity(dto.personaId, 0L, dto.name, dto.avatarUrl, "", "", true) }
-                personaDao.insertAll(personas)
-                list.forEach { dto -> refreshHistory(dto.personaId) }
-            }
-        } catch (e: Exception) { Log.e("ChatRepo", "Sync failed: ${e.message}") }
-    }
-
-    // [Fix] 修复云端消息重复显示的问题
     suspend fun refreshHistory(personaId: Long) {
         val userId = getCurrentUserId() ?: return
         try {
             val response = api.getHistory(userId, personaId)
             if (response.isSuccess() && response.data != null) {
                 val serverMessages = response.data.map { it.toEntity() }
-
-                // 1. 获取当前本地的云端消息 (用于比对去重)
-                val localMessages = chatDao.getCloudChatHistory(userId, personaId).first()
-
-                // 2. 执行智能合并
+                // 扩大本地查找范围，确保能清理掉所有陈旧的重复数据
+                val localMessages = chatDao.getCloudChatHistory(userId, personaId, 2000).first()
                 mergeAndSyncMessages(localMessages, serverMessages)
             }
-        } catch (e: Exception) { Log.e("ChatRepo", "Refresh failed: ${e.message}") }
+        } catch (e: Exception) {
+            Log.e("ChatRepo", "Refresh failed: ${e.message}")
+        }
     }
 
-    // [New] 核心去重逻辑 - 已修复 AI 回复重复问题
+    /**
+     * ✅ [Final Fix] 强力去重与同步
+     * 策略：服务器数据是 Authority。凡是内容匹配的本地数据（无论时间是否对齐），一律视为缓存替身进行删除。
+     */
     private suspend fun mergeAndSyncMessages(localMsgs: List<ChatMessageEntity>, serverMsgs: List<ChatMessageEntity>) {
         val toInsert = mutableListOf<ChatMessageEntity>()
         val toDelete = mutableListOf<ChatMessageEntity>()
-
-        // 记录已经匹配过的本地消息 ID，防止一对多误删
         val matchedLocalIds = mutableSetOf<Long>()
 
         for (serverMsg in serverMsgs) {
-            // 检查本地是否已经有这条消息 (ID 完全一致)
-            val isExactMatch = localMsgs.any { it.id == serverMsg.id }
+            // 1. ID 精确匹配 (最理想情况)
+            val exactMatch = localMsgs.find { it.id == serverMsg.id }
 
-            if (!isExactMatch) {
-                // ID 不一致，可能是新消息，或者本地存在的"影子"消息（ID不同但内容相同）
+            if (exactMatch != null) {
+                // 更新服务器最新数据，但保留本地的文件路径
+                val mergedMsg = serverMsg.copy(
+                    localFilePath = exactMatch.localFilePath ?: serverMsg.localFilePath,
+                    status = 2
+                )
+                toInsert.add(mergedMsg)
+                matchedLocalIds.add(exactMatch.id)
+                continue
+            }
 
-                // 1. 处理 USER 消息的去重 (原有的逻辑)
-                if (serverMsg.role == "user") {
-                    val duplicateLocal = localMsgs.firstOrNull { local ->
-                        local.role == "user" &&
-                                local.content == serverMsg.content &&
-                                local.id != serverMsg.id &&
-                                local.id !in matchedLocalIds &&
-                                local.status != 3
-                    }
+            // 2. 模糊匹配 (清理本地缓存/影子消息)
+            // ✅ 改动：使用 filter 找出 *所有* 匹配的本地垃圾数据
+            val shadows = localMsgs.filter { local ->
+                local.id !in matchedLocalIds &&
+                        local.role == serverMsg.role &&
+                        local.msgType == serverMsg.msgType &&
+                        local.status != 3 && // 不删发送失败的消息
+                        (
+                                // A. 文本消息：忽略时间，只看内容！
+                                // 这能解决时区不一致导致的重复问题 (例如本地是UTC+8，服务器是UTC)
+                                (local.msgType == 0 && local.content == serverMsg.content && local.content.isNotEmpty()) ||
 
-                    if (duplicateLocal != null) {
-                        toDelete.add(duplicateLocal)
-                        matchedLocalIds.add(duplicateLocal.id)
-                    }
-                }
+                                        // B. 图片/语音：必须依赖时间 (因为内容通常一样或为空)
+                                        // 保持 120秒 容差
+                                        (local.msgType != 0 && isTimeClose(local.createdAt, serverMsg.createdAt))
+                                )
+            }
 
-                // 2. [新增] 处理 ASSISTANT (AI) 消息的去重
-                // 解决场景：sendMessage 插入了 AI 回复(ID可能不准)，refreshHistory 又拉取了同一条(真实ID)
-                else if (serverMsg.role == "assistant") {
-                    val duplicateLocal = localMsgs.firstOrNull { local ->
-                        local.role == "assistant" &&
-                                local.content == serverMsg.content && // 内容相同
-                                local.id != serverMsg.id &&           // ID 不同
-                                local.id !in matchedLocalIds          // 未被匹配过
-                        // 这里不需要检查 status，因为 AI 消息通常直接是 status=2
-                    }
+            if (shadows.isNotEmpty()) {
+                // 找到了一个或多个替身，全部删除！
+                toDelete.addAll(shadows)
+                shadows.forEach { matchedLocalIds.add(it.id) }
 
-                    if (duplicateLocal != null) {
-                        // 找到了本地那个 ID 不对的替身，删掉它
-                        toDelete.add(duplicateLocal)
-                        matchedLocalIds.add(duplicateLocal.id)
-                    }
-                }
+                // 尝试继承第一个替身的本地路径 (如果有)
+                val existingPath = shadows.firstNotNullOfOrNull { it.localFilePath }
 
-                // 无论如何，把服务器的真消息插进去
-                toInsert.add(serverMsg)
+                // 插入服务器数据
+                val mergedMsg = serverMsg.copy(
+                    localFilePath = existingPath ?: serverMsg.localFilePath,
+                    status = 2
+                )
+                toInsert.add(mergedMsg)
             } else {
-                // 已经有了，覆盖更新一下以防万一
+                // 纯新消息
                 toInsert.add(serverMsg)
-                // 同时也标记这个 ID 已被匹配，防止误判
-                matchedLocalIds.add(serverMsg.id)
             }
         }
 
-        // 建议：将删除和插入操作放在同一个事务中执行，避免 UI 闪烁
-        // 这里分开写在逻辑上是没问题的，只要 ViewModel 观察的是 Flow
-        if (toDelete.isNotEmpty()) {
-            toDelete.forEach { chatDao.deleteMessage(it) }
-        }
-        if (toInsert.isNotEmpty()) {
-            chatDao.insertMessages(toInsert)
+        // 提交事务：删旧 + 插新
+        if (toDelete.isNotEmpty() || toInsert.isNotEmpty()) {
+            chatDao.syncMessages(toDelete, toInsert)
         }
     }
 
-    suspend fun sendMessage(
-        personaId: Long,
-        content: String,
-        isImageGen: Boolean = false,
-        isPrivateMode: Boolean = false
-    ) {
+    private fun isTimeClose(time1: String, time2: String): Boolean {
+        return try {
+            val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+            val t1 = format.parse(time1)?.time ?: 0L
+            val t2 = format.parse(time2)?.time ?: 0L
+            kotlin.math.abs(t1 - t2) < 120 * 1000 // 2分钟容差
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun sendMessage(personaId: Long, content: String, isImageGen: Boolean = false, isPrivateMode: Boolean = false) {
         val userId = getCurrentUserId() ?: return
         val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(Date())
 
-        // 私密模式用负数ID，云端模式用0 (Room自增)
-        val msgId = if (isPrivateMode) -System.currentTimeMillis() else 0L
+        val tempUserMsg = ChatMessageEntity(userId = userId, personaId = personaId, role = "user", content = content, createdAt = timestamp, status = 0, msgType = 0)
 
-        val tempUserMsg = ChatMessageEntity(
-            id = msgId,
-            userId = userId,
-            personaId = personaId,
-            role = "user",
-            content = content,
-            createdAt = timestamp,
-            status = 2,
-            msgType = 0
-        )
-
-        chatDao.insertMessage(tempUserMsg)
+        val localId = if (isPrivateMode) {
+            chatDao.insertMessage(tempUserMsg.copy(id = -System.currentTimeMillis()))
+        } else {
+            chatDao.insertMessage(tempUserMsg)
+        }
 
         if (isPrivateMode) {
-            // ... 私密模式逻辑保持不变 ...
             val aiMsgId = -System.currentTimeMillis() - 1
-            val tempAiMsg = ChatMessageEntity(
-                id = aiMsgId, userId = userId, personaId = personaId, role = "assistant",
-                content = "", createdAt = timestamp, status = 1
-            )
+            val tempAiMsg = ChatMessageEntity(id = aiMsgId, userId = userId, personaId = personaId, role = "assistant", content = "", createdAt = timestamp, status = 1)
             chatDao.insertMessage(tempAiMsg)
-
             val sb = StringBuilder()
             try {
                 localLLMService.generateResponse(userId, personaId, content).collect { chunk ->
                     sb.append(chunk)
                     chatDao.updateMessage(tempAiMsg.copy(content = sb.toString(), status = 2))
                 }
-                CoroutineScope(Dispatchers.IO).launch {
-                    localLLMService.summarizeAndSaveMemory(userId, personaId, "User: $content\nAI: $sb")
-                }
+                CoroutineScope(Dispatchers.IO).launch { localLLMService.summarizeAndSaveMemory(userId, personaId, "User: $content\nAI: $sb") }
             } catch (e: Exception) {
                 chatDao.updateMessage(tempAiMsg.copy(content = "Error: ${e.message}", status = 3))
             }
         } else {
-            // === ☁️ 云端模式 ===
             try {
-                Log.d("ChatRepo", "Sending Cloud Msg: $content")
                 val request = SendMessageRequest(userId, personaId, content, isImageGen)
                 val response = api.sendMessage(request)
 
                 if (response.isSuccess() && response.data != null) {
-                    // 插入 AI 回复
-                    chatDao.insertMessage(response.data.toEntity())
-                    // 发送成功后，通常建议触发一次同步，确保 ID 对齐 (上面加了去重逻辑，所以这里安全了)
-                    refreshHistory(personaId)
+                    val aiMsgDto = response.data
+                    chatDao.updateMessage(tempUserMsg.copy(id = localId, status = 2))
+
+                    val aiMsgEntity = aiMsgDto.toEntity()
+                    // 插入时做一次简单查重
+                    val exists = chatDao.getCloudChatHistory(userId, personaId, 100).first().any { it.id == aiMsgEntity.id }
+                    if (!exists) {
+                        chatDao.insertMessage(aiMsgEntity)
+                    }
                 } else {
-                    Log.e("ChatRepo", "Cloud Error: ${response.message}")
+                    chatDao.updateMessage(tempUserMsg.copy(id = localId, status = 3))
                 }
             } catch (e: Exception) {
-                Log.e("ChatRepo", "Cloud Exception", e)
+                chatDao.updateMessage(tempUserMsg.copy(id = localId, status = 3))
             }
         }
     }
@@ -229,15 +203,13 @@ class ChatRepository @Inject constructor(
         val userId = getCurrentUserId() ?: return
         val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).format(Date())
 
-        // 1. 创建并插入本地临时消息 (Status=0 Sending)
         val tempUserMsg = ChatMessageEntity(
             userId = userId, personaId = personaId, role = "user",
             content = "[语音]", createdAt = timestamp, status = 0, msgType = 2, duration = duration, localFilePath = audioFile.absolutePath
         )
-        val localId = chatDao.insertMessage(tempUserMsg) // 获取本地 Room 生成的 ID
+        val localId = chatDao.insertMessage(tempUserMsg)
 
         try {
-            // 2. 发起网络请求
             val requestFile = audioFile.asRequestBody("audio/wav".toMediaTypeOrNull())
             val filePart = MultipartBody.Part.createFormData("file", audioFile.name, requestFile)
             val userIdPart = userId.toString().toRequestBody("text/plain".toMediaTypeOrNull())
@@ -247,30 +219,37 @@ class ChatRepository @Inject constructor(
             val response = api.sendAudio(filePart, userIdPart, personaIdPart, durationPart)
 
             if (response.isSuccess() && response.data != null) {
-                // ✅ [Fixed] 成功后：
-                // A. 将本地临时消息删除
-                // B. 插入服务端返回的正式消息
-                // C. 重要：把本地的 localFilePath 复制给正式消息，避免 UI 重新下载音频
-
                 val serverMsgEntity = response.data.toEntity().copy(
-                    localFilePath = audioFile.absolutePath, // 继承本地路径
-                    status = 2 // 确保是成功状态
+                    localFilePath = audioFile.absolutePath,
+                    status = 2
                 )
-
-                // 使用 ChatDao 的事务方法或手动执行删除+插入
                 chatDao.replaceLocalWithServerMessage(
                     localMsg = tempUserMsg.copy(id = localId),
                     serverMsg = serverMsgEntity
                 )
-
-                // 触发一次刷新以获取可能的 AI 回复 (如果 sendAudio 接口没返回 AI 回复的话)
                 refreshHistory(personaId)
             } else {
                 throw Exception("Server error")
             }
         } catch (e: Exception) {
-            // 失败：更新本地消息状态为 3 (Failed)
             chatDao.updateMessage(tempUserMsg.copy(id = localId, status = 3))
+        }
+    }
+
+    suspend fun syncConversationList() {
+        val userId = getCurrentUserId() ?: return
+        try {
+            val response = api.getConversations(userId)
+            if (response.isSuccess() && response.data != null) {
+                val list = response.data
+                val personas = list.map { dto ->
+                    PersonaEntity(dto.personaId, 0L, dto.name, dto.avatarUrl, "", "", true)
+                }
+                personaDao.insertAll(personas)
+                list.forEach { dto -> refreshHistory(dto.personaId) }
+            }
+        } catch (e: Exception) {
+            Log.e("ChatRepo", "Sync failed: ${e.message}")
         }
     }
 
