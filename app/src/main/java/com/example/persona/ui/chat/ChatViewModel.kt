@@ -18,23 +18,18 @@ import com.example.persona.utils.AudioRecorderManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Collections
 import java.util.Locale
 import javax.inject.Inject
 
-// 定义 UI 事件
-sealed interface ChatUiEvent {
-    data object ScrollToBottom : ChatUiEvent
-}
+// [已删除] ChatUiEvent 接口及其 Channel，因为 ChatScreen 已通过 latestMessageId 实现自动滚动
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -59,19 +54,18 @@ class ChatViewModel @Inject constructor(
     var isPrivateMode by mutableStateOf(false)
     var memories: Flow<List<UserMemoryEntity>> = emptyFlow()
 
-    // --- 语音相关 State [Modified] ---
+    // --- 语音相关 State ---
     var isRecording by mutableStateOf(false)
         private set
 
-    // [New] 是否处于"松开取消"的状态 (手指滑到了上方区域)
+    // 是否处于"松开取消"的状态
     var isVoiceCancelling by mutableStateOf(false)
 
-    // [New] 暴露录音时的音量振幅 (0f ~ 1f)，用于驱动波纹动画
+    // 暴露录音时的音量振幅 (0f ~ 1f)
     val voiceAmplitude = audioRecorder.amplitude
 
-    // --- UI Events ---
-    private val _uiEvent = Channel<ChatUiEvent>()
-    val uiEvent = _uiEvent.receiveAsFlow()
+    // [已删除] private val _uiEvent = Channel<ChatUiEvent>()
+    // [已删除] val uiEvent = _uiEvent.receiveAsFlow()
 
     // --- Pagination ---
     private val _messageLimit = MutableStateFlow(20)
@@ -223,7 +217,7 @@ class ChatViewModel @Inject constructor(
     private fun startTypewriter(msg: ChatMessage) {
         typedMessageIds.add(msg.id)
         animatingMessageIds.add(msg.id)
-        viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
+        // [已删除] _uiEvent.send(ChatUiEvent.ScrollToBottom) - 冗余
 
         viewModelScope.launch {
             try {
@@ -255,25 +249,30 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         isSending = true
-        viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
+        // [已删除] _uiEvent.send(...) - 冗余
         viewModelScope.launch {
-            chatRepository.sendMessage(currentPersonaId, text, false, isPrivateMode)
-            isSending = false
+            try {
+                chatRepository.sendMessage(currentPersonaId, text, false, isPrivateMode)
+            } finally {
+                isSending = false
+            }
         }
     }
 
     fun sendImageGenRequest(text: String) {
         if (text.isBlank()) return
         isSending = true
-        viewModelScope.launch { _uiEvent.send(ChatUiEvent.ScrollToBottom) }
+        // [已删除] _uiEvent.send(...) - 冗余
         viewModelScope.launch {
-            chatRepository.sendMessage(currentPersonaId, text, true, false)
-            isSending = false
+            try {
+                chatRepository.sendMessage(currentPersonaId, text, true, false)
+            } finally {
+                isSending = false
+            }
         }
     }
 
     fun startRecording(): Boolean {
-        // [Modified] 开始录音时，重置取消状态
         isVoiceCancelling = false
         val success = audioRecorder.startRecording()
         if (success) isRecording = true
@@ -282,16 +281,14 @@ class ChatViewModel @Inject constructor(
 
     fun stopRecording() {
         isRecording = false
-        // [New] 停止录音时也重置取消状态
         isVoiceCancelling = false
         viewModelScope.launch {
             val result = audioRecorder.stopRecording()
             if (result != null) {
                 val (file, duration) = result
-                // [Modified] 增加一个极短语音过滤，防止误触
-                if (duration >= 1) {
+                // [Modified] 修复：阈值改为 > 0，且移除了导致死锁的 _uiEvent.send
+                if (duration > 0) {
                     isSending = true
-                    _uiEvent.send(ChatUiEvent.ScrollToBottom)
                     try {
                         chatRepository.sendAudioMessage(currentPersonaId, file, duration)
                     } finally { isSending = false }

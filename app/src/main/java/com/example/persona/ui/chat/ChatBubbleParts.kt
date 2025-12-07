@@ -114,13 +114,12 @@ fun ChatMessageContent(
                     text = MaterialTheme.typography.bodyMedium,
                     paragraph = MaterialTheme.typography.bodyMedium,
 
-                    // ✅ [Fix] 移除了 background = Color.Transparent，避免干扰
                     code = MaterialTheme.typography.bodyMedium.copy(
                         fontFamily = FontFamily.Monospace
                     ),
 
                     list = MaterialTheme.typography.bodyMedium,
-                    quote = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic, color = Color.Gray)
+                    quote = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 )
 
                 val compactPadding = markdownPadding(
@@ -130,26 +129,28 @@ fun ChatMessageContent(
                     indentList = 8.dp
                 )
 
+                // 颜色逻辑优化：适配亮色/暗色模式，模仿 Gemini 风格
+                val contentColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                val linkColor = if (isUser) MaterialTheme.colorScheme.inversePrimary else MaterialTheme.colorScheme.primary
+                val codeBgColor = if (isUser) {
+                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                }
+
                 Markdown(
                     content = msg.displayContent,
                     modifier = Modifier.padding(4.dp),
                     typography = compactTypography,
                     padding = compactPadding,
-                    // ✅ [Fix] 修复配色冲突问题
                     colors = markdownColor(
-                        text = if (isUser) Color.White else Color.Black,
-                        codeText = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
-
-                        // 核心修复：
-                        // 如果是用户(深色底)：用半透明白，对比度高。
-                        // 如果是AI(灰色底)：用 Surface 色 (通常是纯白) 或者稍微深一点的颜色，与 surfaceVariant (气泡底) 形成反差。
-                        codeBackground = if (isUser) {
-                            Color.White.copy(alpha = 0.2f)
-                        } else {
-                            // 在 SurfaceVariant 背景上，使用 Surface 颜色作为代码块背景，形成"凹槽"或"卡片"效果
-                            MaterialTheme.colorScheme.surface
-                        }
+                        text = contentColor,
+                        codeText = contentColor,
+                        linkText = linkColor,
+                        codeBackground = codeBgColor,
+                        inlineCodeBackground = codeBgColor
                     )
+                    // 已移除 components 参数以修复 0.24.0 版本崩溃问题
                 )
             }
         }

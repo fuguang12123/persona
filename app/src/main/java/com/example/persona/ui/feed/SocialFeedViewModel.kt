@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.persona.data.model.Persona
 import com.example.persona.data.repository.PersonaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -29,11 +30,18 @@ class SocialFeedViewModel @Inject constructor(
     // 0=All (分页), 1=Recommend (不分页)
     var currentTab by mutableStateOf(0)
 
+    // 任务句柄，用于取消过期的请求
+    private var loadJob: Job? = null
+
+    // 🔥 [新增] 推荐数据的内存缓存
+    // 专门用来存上次请求到的推荐智能体，防止切回来又要重新等
+    private var cachedRecommendList: List<Persona>? = null
+
     init {
         // 只有 "全部" 列表需要监听数据库流
-        // 当 currentTab == 0 时，Flow 的数据才会更新 feedList
         viewModelScope.launch {
             repository.getFeedStream().collectLatest {
+                // 只有当前停留在 Tab 0 时，数据库的变动才刷新 UI
                 if (currentTab == 0) {
                     feedList = it
                 }
@@ -45,10 +53,24 @@ class SocialFeedViewModel @Inject constructor(
     fun switchTab(index: Int) {
         if (currentTab == index) return
         currentTab = index
-        refresh()
+
+        // 🔥 [逻辑优化] 切换逻辑升级
+        if (index == 1 && cachedRecommendList != null) {
+            // 场景：切到“推荐”页，且之前加载过（缓存不为空）
+            // 动作：直接显示缓存数据，不发网络请求，不转圈！
+            feedList = cachedRecommendList!!
+            isEndReached = true
+            isLoading = false
+            // 此时 loadJob?.cancel() 就不需要了，因为我们根本没发起新请求
+        } else {
+            // 场景：切到“广场”，或者第一次切到“推荐”（没缓存）
+            // 动作：走标准刷新流程（会触发 loadJob.cancel 和网络请求）
+            refresh()
+        }
     }
 
     // 刷新：重置页码，重新加载
+    // (注意：下拉刷新时调用这个，会强制重新请求，更新缓存)
     fun refresh() {
         currentPage = 1
         isEndReached = false
@@ -62,32 +84,43 @@ class SocialFeedViewModel @Inject constructor(
     }
 
     private fun loadData(isRefresh: Boolean) {
-        viewModelScope.launch {
+        // 每次请求前，先取消上一次可能的慢请求
+        loadJob?.cancel()
+
+        loadJob = viewModelScope.launch {
             isLoading = true
 
-            // [新增] 只有在切换到推荐页时（或刷新推荐页时），为了体验清空旧数据
-            // 这样配合 UI 层的 isLoading 就能显示全屏加载动画，而不是显示上一页残留的数据
+            // 只有当没有缓存可用，或者强制刷新时，才清空列表显示 Loading
+            // 如果是 Tab 0，总是要清空的或者依赖 Flow，这里保留原逻辑即可
             if (currentTab == 1) {
                 feedList = emptyList()
             }
 
             try {
                 if (currentTab == 1) {
-                    // 推荐列表：直接获取不分页
+                    // 推荐列表：请求慢接口
                     val list = repository.getRecommendList()
-                    feedList = list
-                    isEndReached = true // 推荐列表一次性加载完
+
+                    if (currentTab == 1) {
+                        feedList = list
+                        // 🔥 [新增] 请求成功后，存入缓存
+                        cachedRecommendList = list
+                        isEndReached = true
+                    }
                 } else {
                     // 广场列表：分页加载
                     val pageToLoad = if (isRefresh) 1 else currentPage + 1
 
+                    // 这里请求成功后写入 DB，触发上面的 Flow 更新 feedList
                     val hasMore = repository.fetchFeed(pageToLoad, pageSize, "all")
 
-                    if (hasMore) {
-                        currentPage = pageToLoad
-                        isEndReached = false
-                    } else {
-                        isEndReached = true
+                    if (currentTab == 0) {
+                        if (hasMore) {
+                            currentPage = pageToLoad
+                            isEndReached = false
+                        } else {
+                            isEndReached = true
+                        }
                     }
                 }
             } catch (e: Exception) {

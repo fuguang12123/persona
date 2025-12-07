@@ -43,6 +43,7 @@ class PersonaRepository @Inject constructor(
                 if (response.isSuccess() && response.data != null) {
                     val list = response.data
                     val entities = list.map { it.toEntity() }
+                    // 保存到数据库，OnConflictStrategy.REPLACE 保证了如果 ID 相同则更新
                     personaDao.insertAll(entities)
                     list.size >= size
                 } else {
@@ -85,8 +86,6 @@ class PersonaRepository @Inject constructor(
         return idStr?.toLongOrNull()
     }
 
-    // ... 其他方法保持不变 ...
-
     suspend fun toggleFollow(id: Long): Boolean {
         return try {
             val res = api.toggleFollow(id)
@@ -119,11 +118,25 @@ class PersonaRepository @Inject constructor(
         return null
     }
 
+    // ----------------------------------------------------------------
+    // 🔥 [核心修改] 创建成功后，自动拉取第一页数据
+    // ----------------------------------------------------------------
     suspend fun createPersona(persona: Persona): Boolean {
         return try {
             val response = api.createPersona(persona)
-            response.isSuccess()
-        } catch (e: Exception) { false }
+            if (response.isSuccess()) {
+                // 修改点：创建成功后，后台静默拉取最新的第一页数据并写入本地数据库。
+                // 这样当用户返回列表页时，SocialFeedViewModel 监听的 Flow 会自动更新，
+                // 显示出刚刚创建的那个智能体，无需手动刷新。
+                fetchFeed(page = 1, size = 20, type = "all")
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 
     suspend fun updatePersona(id: Long, persona: Persona): Boolean {
@@ -161,9 +174,7 @@ class PersonaRepository @Inject constructor(
         isPublic = this.isPublic ?: true
     )
 
-    // [核心修改] 这里增加了 tagsList 的解析逻辑
     private fun PersonaEntity.toDomainModel(): Persona {
-        // 尝试解析标签字符串：移除 JSON 符号，按逗号分割
         val derivedTags = if (!this.personalityTags.isNullOrEmpty()) {
             this.personalityTags
                 .replace("[", "")
@@ -184,7 +195,7 @@ class PersonaRepository @Inject constructor(
             description = this.description,
             personalityTags = this.personalityTags,
             isPublic = this.isPublic,
-            tagsList = derivedTags // 将解析后的列表赋值给领域模型
+            tagsList = derivedTags
         )
     }
 }

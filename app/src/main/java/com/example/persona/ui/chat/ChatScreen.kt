@@ -105,13 +105,12 @@ fun ChatScreen(
     }
 
     // [New] 监听 UI 事件 (滚动到底部)
-    LaunchedEffect(Unit) {
-        viewModel.uiEvent.collect { event ->
-            when (event) {
-                ChatUiEvent.ScrollToBottom -> {
-                    listState.animateScrollToItem(0)
-                }
-            }
+    val latestMessageId = viewModel.messages.firstOrNull()?.id
+    LaunchedEffect(latestMessageId) {
+        if (latestMessageId != null) {
+            // animateScrollToItem 带动画，视觉更丝滑
+            // 如果想瞬间跳过去，可以用 scrollToItem(0)
+            listState.animateScrollToItem(0)
         }
     }
 

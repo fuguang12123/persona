@@ -24,6 +24,7 @@ data class EditProfileUiState(
     val backgroundImageUrl: String = "",
     val isLoading: Boolean = false,
     val isSaved: Boolean = false,
+    val hasChanges: Boolean = false, // 新增：标记是否有未保存的修改
     val error: String? = null
 )
 
@@ -36,6 +37,12 @@ class EditProfileViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(EditProfileUiState())
     val uiState = _uiState.asStateFlow()
 
+    // 用于存储初始状态，用来对比是否发生了修改
+    private var initialNickname = ""
+    private var initialAvatarUrl = ""
+    private var initialBackgroundImageUrl = ""
+    private var isDataLoaded = false
+
     init {
         loadCurrentProfile()
     }
@@ -46,11 +53,19 @@ class EditProfileViewModel @Inject constructor(
                 val res = authService.getMyProfile()
                 if (res.isSuccessful && res.body()?.code == 200) {
                     val user = res.body()?.data
+
+                    // 保存初始值
+                    initialNickname = user?.nickname ?: user?.username ?: ""
+                    initialAvatarUrl = user?.avatarUrl ?: ""
+                    initialBackgroundImageUrl = user?.backgroundImageUrl ?: ""
+                    isDataLoaded = true
+
                     _uiState.update {
                         it.copy(
-                            nickname = user?.nickname ?: user?.username ?: "",
-                            avatarUrl = user?.avatarUrl ?: "",
-                            backgroundImageUrl = user?.backgroundImageUrl ?: ""
+                            nickname = initialNickname,
+                            avatarUrl = initialAvatarUrl,
+                            backgroundImageUrl = initialBackgroundImageUrl,
+                            hasChanges = false
                         )
                     }
                 }
@@ -60,8 +75,19 @@ class EditProfileViewModel @Inject constructor(
         }
     }
 
+    // 检查当前状态是否与初始状态不同
+    private fun checkChanges(currentState: EditProfileUiState): Boolean {
+        if (!isDataLoaded) return false
+        return currentState.nickname != initialNickname ||
+                currentState.avatarUrl != initialAvatarUrl ||
+                currentState.backgroundImageUrl != initialBackgroundImageUrl
+    }
+
     fun onNicknameChange(v: String) {
-        _uiState.update { it.copy(nickname = v) }
+        _uiState.update {
+            val newState = it.copy(nickname = v)
+            newState.copy(hasChanges = checkChanges(newState))
+        }
     }
 
     fun uploadImage(uri: Uri, isAvatar: Boolean) {
@@ -77,7 +103,8 @@ class EditProfileViewModel @Inject constructor(
                     if (res.isSuccessful && res.body()?.code == 200) {
                         val url = res.body()?.data ?: ""
                         _uiState.update {
-                            if (isAvatar) it.copy(avatarUrl = url) else it.copy(backgroundImageUrl = url)
+                            val newState = if (isAvatar) it.copy(avatarUrl = url) else it.copy(backgroundImageUrl = url)
+                            newState.copy(hasChanges = checkChanges(newState))
                         }
                     } else {
                         _uiState.update { it.copy(error = "上传失败: ${res.message()}") }
@@ -102,7 +129,12 @@ class EditProfileViewModel @Inject constructor(
                 )
                 val res = authService.updateProfile(req)
                 if (res.isSuccessful && res.body()?.code == 200) {
-                    _uiState.update { it.copy(isSaved = true) }
+                    // 保存成功后，更新初始值，这样 hasChanges 就会变为 false
+                    initialNickname = _uiState.value.nickname
+                    initialAvatarUrl = _uiState.value.avatarUrl
+                    initialBackgroundImageUrl = _uiState.value.backgroundImageUrl
+
+                    _uiState.update { it.copy(isSaved = true, hasChanges = false) }
                 } else {
                     _uiState.update { it.copy(error = res.body()?.message ?: "保存失败") }
                 }
