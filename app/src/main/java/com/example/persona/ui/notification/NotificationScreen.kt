@@ -52,6 +52,14 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+/**
+ * 通知列表界面
+ * 显示用户收到的所有通知(点赞、评论、回复等)
+ *
+ * @param viewModel 通知视图模型,使用Hilt注入
+ * @param onBackClick 返回按钮点击回调
+ * @param onPostClick 点击通知跳转到对应帖子的回调,传入帖子ID
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationScreen(
@@ -59,7 +67,9 @@ fun NotificationScreen(
     onBackClick: () -> Unit,
     onPostClick: (Long) -> Unit
 ) {
+    // 收集通知列表状态
     val notifications by viewModel.notifications.collectAsState()
+    // 收集加载状态
     val isLoading by viewModel.isLoading.collectAsState()
 
     Scaffold(
@@ -77,6 +87,7 @@ fun NotificationScreen(
             )
         }
     ) { padding ->
+        // 加载中且列表为空时显示加载指示器
         if (isLoading && notifications.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -84,7 +95,9 @@ fun NotificationScreen(
             ) {
                 CircularProgressIndicator()
             }
-        } else if (notifications.isEmpty()) {
+        }
+        // 加载完成但列表为空时显示空状态提示
+        else if (notifications.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -103,17 +116,21 @@ fun NotificationScreen(
                     )
                 }
             }
-        } else {
+        }
+        // 有通知时显示列表
+        else {
             LazyColumn(
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize()
             ) {
                 items(notifications) { item ->
+                    // 渲染每条通知
                     NotificationItem(
                         notification = item,
                         onClick = { onPostClick(item.postId) }
                     )
+                    // 分隔线
                     HorizontalDivider(
                         thickness = 0.5.dp,
                         color = Color.LightGray.copy(alpha = 0.3f)
@@ -124,11 +141,20 @@ fun NotificationScreen(
     }
 }
 
+/**
+ * 通知列表项组件
+ * 显示单条通知的详细信息
+ *
+ * @param notification 通知数据对象
+ * @param onClick 点击通知的回调
+ */
 @Composable
 fun NotificationItem(
     notification: NotificationDto,
     onClick: () -> Unit
 ) {
+    // 根据通知类型决定显示的图标、颜色和文字
+    // type 1: 点赞 | type 2: 评论 | type 3: 回复
     val (icon, iconColor, actionText) = when (notification.type) {
         1 -> Triple(Icons.Default.Favorite, Color(0xFFFF5252), "赞了你的动态")
         2 -> Triple(Icons.AutoMirrored.Filled.Message, Color(0xFF2196F3), "评论了你的动态")
@@ -136,6 +162,7 @@ fun NotificationItem(
         else -> Triple(Icons.Default.Notifications, Color.Gray, "有一条新通知")
     }
 
+    // 将时间戳转换为相对时间显示(如"5分钟前")
     val timeAgoStr = remember(notification.createdAt) {
         try {
             val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
@@ -147,7 +174,7 @@ fun NotificationItem(
         }
     }
 
-    // [Logic Update] 统一头像逻辑
+    // 统一头像逻辑:如果没有头像则使用 DiceBear 生成
     val avatarUrl = remember(notification.senderAvatar, notification.senderName) {
         if (notification.senderAvatar.isNullOrBlank()) {
             "https://api.dicebear.com/7.x/avataaars/png?seed=${notification.senderName}"
@@ -163,6 +190,7 @@ fun NotificationItem(
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 发送者头像
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
                 .data(avatarUrl)
@@ -178,7 +206,9 @@ fun NotificationItem(
 
         Spacer(modifier = Modifier.width(12.dp))
 
+        // 通知内容区域
         Column(modifier = Modifier.weight(1f)) {
+            // 发送者名称
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = notification.senderName ?: "未知用户",
@@ -189,6 +219,7 @@ fun NotificationItem(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // 动作类型提示(带图标)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = icon,
@@ -206,6 +237,7 @@ fun NotificationItem(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // 时间显示
             Text(
                 text = timeAgoStr,
                 style = MaterialTheme.typography.labelSmall,

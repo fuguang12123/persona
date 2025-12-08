@@ -25,20 +25,28 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
+/**
+ * 登录界面组合函数
+ *
+ * @param viewModel 登录视图模型,使用Hilt注入
+ * @param onLoginSuccess 登录成功后的回调函数
+ * @param onRegisterClick 点击注册按钮的回调函数
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
     viewModel: LoginViewModel = hiltViewModel(),
     onLoginSuccess: () -> Unit,
-    onRegisterClick: () -> Unit // ✅ 添加这个参数
+    onRegisterClick: () -> Unit
 ) {
     val context = LocalContext.current
     val uiState = viewModel.uiState
 
+    // 监听登录成功状态,触发导航
     LaunchedEffect(viewModel.loginSuccess) {
         if (viewModel.loginSuccess) {
             onLoginSuccess()
-            viewModel.onNavigated()
+            viewModel.onNavigated() // 重置导航状态
         }
     }
 
@@ -51,9 +59,11 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+            // 应用标题
             Text("Persona AI", style = MaterialTheme.typography.displayMedium)
             Spacer(modifier = Modifier.height(32.dp))
 
+            // 用户名输入框
             OutlinedTextField(
                 value = viewModel.username,
                 onValueChange = { viewModel.username = it },
@@ -62,6 +72,7 @@ fun LoginScreen(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
+            // 密码输入框,使用密码变换隐藏输入
             OutlinedTextField(
                 value = viewModel.password,
                 onValueChange = { viewModel.password = it },
@@ -70,6 +81,7 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            // 显示错误信息
             if (uiState is LoginUiState.Error) {
                 Text(
                     text = uiState.msg,
@@ -80,13 +92,17 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // 登录按钮,加载时显示进度指示器
             Button(
                 onClick = { viewModel.onLoginClick() },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = uiState !is LoginUiState.Loading
             ) {
                 if (uiState is LoginUiState.Loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
                 } else {
                     Text("登录")
                 }
@@ -94,9 +110,9 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ✅ 注册按钮
+            // 注册按钮
             TextButton(onClick = onRegisterClick) {
-                Text("没有账号？去注册")
+                Text("没有账号?去注册")
             }
         }
     }

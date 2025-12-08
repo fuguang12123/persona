@@ -69,8 +69,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.persona.data.remote.CommentDto
 
-// 注意：DateUtils 需自行保留或使用 Java SimpleDateFormat
-// import com.example.persona.utils.DateUtils
+
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable

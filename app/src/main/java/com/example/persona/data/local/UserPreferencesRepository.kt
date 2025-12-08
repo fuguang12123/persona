@@ -20,6 +20,15 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "us
 class UserPreferencesRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    /**
+     * @class com.example.persona.data.local.UserPreferencesRepository
+     * @description 基于 DataStore 的用户偏好与会话持久化仓库，提供用户ID/Token/头像/昵称的 Flow 观察与更新方法，用于支持多账户登录、资料展示与云端认证拦截。在 MVVM 中作为本地 SSOT 提供者，UI 与网络层分别订阅其数据，保证一致性与解耦。对应《最终作业.md》的从 Mock 到真实服务（C3），并为 AuthInterceptor 提供认证信息来源。
+     * @author Persona Team <persona@project.local>
+     * @version v1.0.0
+     * @since 2025-11-30
+     * @see com.example.persona.data.remote.AuthInterceptor
+     * @关联功能 REQ-C3 架构演进-多账户与数据隔离
+     */
     // 键定义
     private val USER_ID_KEY = stringPreferencesKey("user_id")
     private val AUTH_TOKEN_KEY = stringPreferencesKey("auth_token")

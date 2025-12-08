@@ -24,6 +24,15 @@ data class ConversationView(
 /**
  * ChatDao: 负责聊天消息的数据库访问操作
  */
+/**
+ * @class com.example.persona.data.local.dao.ChatDao
+ * @description 聊天消息的 Room DAO，提供云端/私密两种历史查询、批量插入/更新/删除、以及原子事务方法以保障去重同步与临时消息替换的一致性。DAO 返回 `Flow<List<ChatMessageEntity>>` 供 UI 层观察，实现 MVVM 单一数据源（SSOT）。事务方法 `replaceLocalWithServerMessage`、`syncMessages` 是聊天可靠性的关键：在云端与端侧协同时，避免重复与闪烁，确保时间线与主键统一。对应《最终作业.md》中的直接对话（B4）、端云协同（C4），并为流式输出（C1）的 UI 动画提供稳定的数据基础。
+ * @author Persona Team <persona@project.local>
+ * @version v1.0.0
+ * @since 2025-11-30
+ * @see com.example.persona.data.repository.ChatRepository
+ * @关联功能 REQ-B4 直接对话；REQ-C4 端云协同；REQ-C1 流式输出
+ */
 @Dao
 interface ChatDao {
     // --- 基础消息查询功能 ---
@@ -109,6 +118,18 @@ interface ChatDao {
      * 场景：消息发送成功后，将本地生成的临时消息（ID可能不准）删除，插入服务器返回的带正确 ID 的消息
      * 使用 @Transaction 确保原子性，防止数据不一致
      */
+    /**
+     * 功能: 原子替换本地临时消息为服务器正式消息，修复主键与时间线。
+     * 实现逻辑:
+     * 1. 删除本地临时记录（可能为负ID或占位）
+     * 2. 插入服务器返回的正式消息（带真实ID与状态）
+     * 边界处理: 任一步骤异常由 Room 事务回滚保证一致性
+     * @param localMsg ChatMessageEntity - 待替换的本地消息
+     * @param serverMsg ChatMessageEntity - 服务器正式消息
+     * 关联功能: REQ-B4 直接对话；REQ-C4 协同一致性
+     * 复杂度分析: 时间 O(1) | 空间 O(1)
+     * 线程安全: 是 - @Transaction 保证原子性
+     */
     @Transaction
     suspend fun replaceLocalWithServerMessage(localMsg: ChatMessageEntity, serverMsg: ChatMessageEntity) {
         deleteMessage(localMsg)
@@ -120,12 +141,21 @@ interface ChatDao {
      * 场景：从服务器拉取最新历史记录后，执行去重逻辑，需要删除本地重复/过期的消息并插入新消息
      * 使用 @Transaction 确保操作的原子性，避免 UI 闪烁或数据不一致
      */
+    /**
+     * 功能: 原子同步消息列表（批量删除 + 批量插入），用于强力去重后的落库提交。
+     * 实现逻辑: 遍历删除冗余/影子消息 -> 批量插入合并后的权威消息。
+     * @param toDelete List<ChatMessageEntity> - 待删除集合
+     * @param toInsert List<ChatMessageEntity> - 待插入集合
+     * 关联功能: REQ-B4 直接对话；REQ-C4 协同一致性
+     * 复杂度分析: 时间 O(N) | 空间 O(N)
+     * 线程安全: 是 - @Transaction 保证原子性
+     */
     @Transaction
     suspend fun syncMessages(toDelete: List<ChatMessageEntity>, toInsert: List<ChatMessageEntity>) {
         toDelete.forEach { deleteMessage(it) }
         insertMessages(toInsert)
     }
-
+    
     // --- 会话列表查询 ---
 
     /**

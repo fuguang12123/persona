@@ -73,6 +73,15 @@ import com.example.persona.data.model.ChatMessage
  * ChatScreen: 聊天主界面
  * 包含：消息列表 (LazyColumn)、输入区域 (ChatInputArea)、顶部导航栏 (TopAppBar)
  */
+/**
+ * @class com.example.persona.ui.chat.ChatScreen
+ * @description Compose 聊天主界面：包含消息列表、输入区、顶部栏与语音录制 Overlay。根据模式（云端/私密）调整渲染与滚动逻辑；配合 ViewModel 的打字机动画与分页加载，实现流式输出与平滑交互。参数包括 Persona ID 与导航回调，遵循无副作用 Composable 设计。
+ * @author Persona Team <persona@project.local>
+ * @version v1.0.0
+ * @since 2025-11-30
+ * @see com.example.persona.ui.chat.ChatViewModel#sendMessage
+ * @关联功能 REQ-B4 直接对话；REQ-C1 流式输出；REQ-C2 语音交互
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -384,7 +393,6 @@ fun ChatInputArea(
     }
 }
 
-// ... ChatBubble 和 ChatAvatar 保持不变 ...
 @Composable
 fun ChatBubble(
     msg: ChatMessage,

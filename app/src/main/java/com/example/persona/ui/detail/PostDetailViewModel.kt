@@ -26,15 +26,13 @@ data class PostDetailUiState(
     val commentGroups: List<CommentGroup> = emptyList(),
     val authorName: String? = null,
     val authorAvatar: String? = null,
-
-    // [New] 动态详情页增加作者关注状态
     val isAuthorFollowed: Boolean = false
 )
 
 @HiltViewModel
 class PostDetailViewModel @Inject constructor(
     private val postRepository: PostRepository,
-    private val personaRepository: PersonaRepository // [New] 注入 PersonaRepo 以操作关注
+    private val personaRepository: PersonaRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PostDetailUiState())
@@ -66,7 +64,7 @@ class PostDetailViewModel @Inject constructor(
                     authorName = detail.authorName,
                     authorAvatar = detail.authorAvatar,
                     isCommentsLoading = false,
-                    isAuthorFollowed = isFollowed // [New]
+                    isAuthorFollowed = isFollowed
                 )}
             }.onFailure { e ->
                 _uiState.update { it.copy(isLoading = false, error = e.message, isCommentsLoading = false) }
@@ -119,6 +117,13 @@ class PostDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Posts a comment to the current post.
+     *
+     * @param postId The ID of the post to which the comment is being added.
+     * @param content The text content of the comment.
+     * @param parentId The optional ID of a parent comment if this is a reply.
+     */
     fun sendComment(postId: Long, content: String, parentId: Long? = null) {
         viewModelScope.launch {
             val result = postRepository.addComment(postId, content, parentId)

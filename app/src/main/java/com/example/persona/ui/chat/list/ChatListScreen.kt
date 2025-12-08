@@ -226,7 +226,6 @@ fun FollowedItem(persona: Persona, onClick: () -> Unit) {
 
 @Composable
 fun ConversationItem(item: ConversationView, onClick: () -> Unit) {
-    // [Fix] 移除了不必要的 !! 断言，消除警告
     val url = remember(item.avatarUrl) {
         if (item.avatarUrl.isNullOrBlank()) {
             "https://api.dicebear.com/7.x/avataaars/png?seed=${item.name}"

@@ -57,6 +57,24 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.persona.data.remote.PostDto
 
+/**
+ * 动态广场主界面
+ *
+ * @description 展示用户发布的动态内容,支持瀑布流布局、点赞/收藏交互,以及"全部/关注"双 Tab 切换。
+ * 通过 ViewModel 观察数据流,实现乐观更新与状态同步,对应《最终作业.md》的社交广场浏览与互动功能。
+ *
+ * @param viewModel 动态信息流的 ViewModel,管理数据加载与用户交互
+ * @param onPostClick 点击动态卡片的回调,传入动态 ID
+ * @param onCreatePostClick 点击发布按钮的回调,跳转到创建动态页面
+ * @param onPersonaClick 点击智能体头像的回调,传入智能体 ID
+ *
+ * @author Persona Team <persona@project.local>
+ * @version v1.0.0
+ * @since 2025-11-30
+ * @see PostFeedViewModel 动态数据管理
+ * @see PostCard 单个动态卡片组件
+ * @关联功能 REQ-B3 社交广场
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostFeedScreen(
@@ -65,30 +83,34 @@ fun PostFeedScreen(
     onCreatePostClick: () -> Unit,
     onPersonaClick: (Long) -> Unit
 ) {
-    val feedState by viewModel.feedState.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val currentTab by viewModel.currentTab.collectAsState()
+    // 订阅 ViewModel 的状态流
+    val feedState by viewModel.feedState.collectAsState() // 动态列表数据
+    val isRefreshing by viewModel.isRefreshing.collectAsState() // 是否正在刷新
+    val currentTab by viewModel.currentTab.collectAsState() // 当前选中的 Tab (0=全部, 1=关注)
 
     Scaffold(
         topBar = {
             Column {
+                // 顶部标题栏
                 TopAppBar(title = { Text("动态广场") })
-                // [New] 顶部 Tab
+
+                // Tab 切换栏 (全部 / 关注)
                 TabRow(selectedTabIndex = currentTab) {
                     Tab(
                         selected = currentTab == 0,
-                        onClick = { viewModel.switchTab(0) },
+                        onClick = { viewModel.switchTab(0) }, // 切换到"全部"
                         text = { Text("全部") }
                     )
                     Tab(
                         selected = currentTab == 1,
-                        onClick = { viewModel.switchTab(1) },
+                        onClick = { viewModel.switchTab(1) }, // 切换到"关注"
                         text = { Text("关注") }
                     )
                 }
             }
         },
         floatingActionButton = {
+            // 右下角的发布按钮
             FloatingActionButton(
                 onClick = onCreatePostClick,
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -102,8 +124,9 @@ fun PostFeedScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(Color(0xFFF5F5F5))
+                .background(Color(0xFFF5F5F5)) // 浅灰色背景
         ) {
+            // 空状态提示 (当列表为空且未在刷新时显示)
             if (feedState.isEmpty() && !isRefreshing) {
                 Column(
                     modifier = Modifier.align(Alignment.Center),
@@ -111,32 +134,37 @@ fun PostFeedScreen(
                 ) {
                     Text("这里静悄悄的...", color = Color.Gray)
                     Button(
-                        onClick = { viewModel.refresh() },
+                        onClick = { viewModel.refresh() }, // 点击刷新按钮重新加载
                         modifier = Modifier.padding(top = 8.dp)
                     ) {
                         Text("刷新")
                     }
                 }
             } else {
+                // 瀑布流布局展示动态列表
                 LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(2),
+                    columns = StaggeredGridCells.Fixed(2), // 固定 2 列
                     contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalItemSpacing = 8.dp,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), // 列间距
+                    verticalItemSpacing = 8.dp, // 行间距
                     modifier = Modifier.fillMaxSize()
                 ) {
+                    // 遍历动态列表,为每个动态创建卡片
                     items(feedState, key = { it.id }) { post ->
                         PostCard(
                             post = post,
-                            onLikeClick = { viewModel.toggleLike(post) },
-                            onBookmarkClick = { viewModel.toggleBookmark(post) },
-                            onClick = { onPostClick(post.id) },
-                            onPersonaClick = onPersonaClick
+                            onLikeClick = { viewModel.toggleLike(post) }, // 点赞/取消点赞
+                            onBookmarkClick = { viewModel.toggleBookmark(post) }, // 收藏/取消收藏
+                            onClick = { onPostClick(post.id) }, // 点击卡片查看详情
+                            onPersonaClick = onPersonaClick // 点击头像跳转到智能体页面
                         )
                     }
+                    // 底部留白,避免被 FAB 遮挡
                     item { Spacer(Modifier.height(80.dp)) }
                 }
             }
+
+            // 刷新加载指示器 (显示在顶部中央)
             if (isRefreshing) {
                 CircularProgressIndicator(
                     modifier = Modifier
@@ -148,6 +176,22 @@ fun PostFeedScreen(
     }
 }
 
+/**
+ * 单个动态卡片组件
+ *
+ * @description 展示动态内容的卡片,包括图片、文字、作者信息、点赞数和收藏按钮。
+ * 支持点击卡片查看详情、点击头像跳转智能体页面、点赞/收藏交互等功能。
+ *
+ * @param post 动态数据对象,包含内容、图片、作者、点赞数等信息
+ * @param onLikeClick 点击点赞按钮的回调
+ * @param onBookmarkClick 点击收藏按钮的回调
+ * @param onClick 点击卡片的回调
+ * @param onPersonaClick 点击作者头像的回调
+ *
+ * @author Persona Team <persona@project.local>
+ * @version v1.0.0
+ * @since 2025-11-30
+ */
 @Composable
 fun PostCard(
     post: PostDto,
@@ -158,37 +202,40 @@ fun PostCard(
 ) {
     val context = LocalContext.current
 
-    // [Logic Update] 头像逻辑统一
+    // 头像 URL 处理逻辑:如果为空则使用默认头像生成服务
     val avatarUrl = remember(post.authorAvatar, post.authorName) {
         if (post.authorAvatar.isNullOrBlank()) {
             "https://api.dicebear.com/7.x/avataaars/png?seed=${post.authorName}"
         } else {
-            post.authorAvatar.replace("/svg", "/png")
+            post.authorAvatar.replace("/svg", "/png") // 统一使用 PNG 格式
         }
     }
 
     Card(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(8.dp), // 圆角卡片
         colors = CardDefaults.cardColors(containerColor = Color.White),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(onClick = onClick) // 点击卡片查看详情
     ) {
         Column {
+            // 如果有图片,显示第一张图片
             if (!post.imageUrls.isNullOrEmpty()) {
                 AsyncImage(
                     model = ImageRequest.Builder(context)
-                        .data(post.imageUrls.first())
-                        .crossfade(true)
+                        .data(post.imageUrls.first()) // 取第一张图片
+                        .crossfade(true) // 开启淡入动画
                         .build(),
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Crop, // 裁剪填充
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 280.dp)
+                        .heightIn(max = 280.dp) // 限制最大高度
                 )
             }
+
             Column(Modifier.padding(10.dp)) {
+                // 动态文字内容 (最多显示 4 行,超出部分显示省略号)
                 if (post.content.isNotBlank()) {
                     Text(
                         text = post.content,
@@ -199,14 +246,17 @@ fun PostCard(
                     )
                 }
 
+                // 作者信息行 (头像 + 昵称)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.clickable {
+                        // 点击头像跳转到智能体详情页
                         post.personaId.toLongOrNull()?.let {
                             if (it > 0) onPersonaClick(it)
                         }
                     }
                 ) {
+                    // 作者头像
                     AsyncImage(
                         model = ImageRequest.Builder(context)
                             .data(avatarUrl)
@@ -215,10 +265,12 @@ fun PostCard(
                         contentDescription = null,
                         modifier = Modifier
                             .size(20.dp)
-                            .clip(CircleShape),
+                            .clip(CircleShape), // 圆形裁剪
                         contentScale = ContentScale.Crop
                     )
                     Spacer(Modifier.width(6.dp))
+
+                    // 作者昵称
                     Text(
                         text = post.authorName ?: "Unknown",
                         style = MaterialTheme.typography.labelSmall,
@@ -228,11 +280,15 @@ fun PostCard(
                         modifier = Modifier.weight(1f)
                     )
                 }
+
                 Spacer(Modifier.height(8.dp))
+
+                // 底部交互区 (点赞按钮 + 收藏按钮)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // 点赞按钮 (显示点赞数和图标)
                     Row(
                         modifier = Modifier.clickable(onClick = onLikeClick),
                         verticalAlignment = Alignment.CenterVertically
@@ -240,16 +296,18 @@ fun PostCard(
                         Icon(
                             imageVector = if (post.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = null,
-                            tint = if (post.isLiked) Color(0xFFFF4D4F) else Color.Gray,
+                            tint = if (post.isLiked) Color(0xFFFF4D4F) else Color.Gray, // 已点赞显示红色
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = if (post.likes > 0) "${post.likes}" else "赞",
+                            text = if (post.likes > 0) "${post.likes}" else "赞", // 点赞数大于 0 时显示数字
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
                     }
+
+                    // 收藏按钮
                     IconButton(
                         onClick = onBookmarkClick,
                         modifier = Modifier.size(24.dp)
@@ -257,7 +315,7 @@ fun PostCard(
                         Icon(
                             imageVector = if (post.isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
                             contentDescription = null,
-                            tint = if (post.isBookmarked) Color(0xFFFFC107) else Color.Gray
+                            tint = if (post.isBookmarked) Color(0xFFFFC107) else Color.Gray // 已收藏显示黄色
                         )
                     }
                 }

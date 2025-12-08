@@ -1,5 +1,5 @@
 [versions]
-agp = "8.4.0" # 如果你的 AS 提示升级，可以改动这个，但建议保持 IDE 默认
+agp = "8.4.0"
 kotlin = "1.9.23"
 coreKtx = "1.13.1"
 junit = "4.13.2"
@@ -20,6 +20,7 @@ datastore = "1.1.1"
 coil = "2.6.0"
 mediapipe = "latest.release" # 端侧 AI
 markdownRenderer = "0.24.0"
+dokka = "1.9.20"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -64,3 +65,4 @@ jetbrains-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = 
 # 关键插件
 google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 google-dagger-hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+jetbrains-dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }

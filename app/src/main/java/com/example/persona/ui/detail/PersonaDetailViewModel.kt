@@ -31,6 +31,15 @@ class PersonaDetailViewModel @Inject constructor(
     private val userPrefs: UserPreferencesRepository
 ) : ViewModel() {
 
+    /**
+     * @class com.example.persona.ui.detail.PersonaDetailViewModel
+     * @description Persona 详情页的状态管理：加载详情、解析标签、判断是否为本人、查询并切换关注状态（乐观更新）。通过 Repository 写入/查询数据，配合 DataStore 获取当前用户信息，实现 UI 的实时更新与交互一致性。对应《最终作业.md》社交广场与直接对话入口的资料展示与关注交互。
+     * @author Persona Team <persona@project.local>
+     * @since 2025-11-30
+     * @see com.example.persona.data.repository.PersonaRepository
+     * @关联功能 REQ-B3 资料与关注；REQ-B4 直接对话入口
+     */
+
     private val _uiState = MutableStateFlow(PersonaDetailUiState())
     val uiState = _uiState.asStateFlow()
 
@@ -68,7 +77,7 @@ class PersonaDetailViewModel @Inject constructor(
         }
     }
 
-    // [New] 切换关注
+
     fun toggleFollow(personaId: Long) {
         val old = _uiState.value.isFollowed
         _uiState.update { it.copy(isFollowed = !old) } // 乐观更新

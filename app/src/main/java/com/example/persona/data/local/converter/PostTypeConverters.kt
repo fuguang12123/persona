@@ -5,7 +5,6 @@ import org.json.JSONArray
 
 /**
  * Room 类型转换器
- * 注意：这是一个 Kotlin 文件 (.kt)，不要创建成 Java 文件 (.java)
  */
 class PostTypeConverters {
 

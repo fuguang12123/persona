@@ -62,6 +62,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import com.example.persona.data.remote.PostDto
 
+/**
+ * 个人中心界面
+ * 显示用户资料、动态、点赞、收藏和智能体列表
+ *
+ * @param viewModel 个人中心视图模型,使用Hilt注入
+ * @param onSettingsClick 设置按钮点击回调
+ * @param onPostClick 点击帖子的回调,传入帖子ID
+ * @param onPersonaClick 点击智能体的回调,传入智能体ID
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
@@ -74,7 +83,10 @@ fun ProfileScreen(
     val user = uiState.user
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // 监听生命周期：每次页面可见时（ON_RESUME）自动刷新数据
+    /**
+     * 监听生命周期:每次页面可见时(ON_RESUME)自动刷新数据
+     * 确保从编辑资料页返回时能看到最新数据
+     */
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -100,13 +112,13 @@ fun ProfileScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            // --- 头部个人信息 ---
+            // --- 头部个人信息区域 ---
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(200.dp)
             ) {
-                // 背景图
+                // 背景图,如果没有则使用默认图片
                 AsyncImage(
                     model = user?.backgroundImageUrl ?: "https://picsum.photos/800/400",
                     contentDescription = null,
@@ -114,14 +126,17 @@ fun ProfileScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // 头像与昵称
+                // 头像与昵称,叠加在背景图底部
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 处理 User 头像 (DiceBear SVG -> PNG)
+                    /**
+                     * 处理用户头像
+                     * 如果是 DiceBear SVG 头像,转换为 PNG 格式
+                     */
                     val rawAvatarUrl = user?.avatarUrl ?: ""
                     val displayAvatarUrl = remember(rawAvatarUrl) {
                         if (rawAvatarUrl.contains("dicebear.com") && rawAvatarUrl.contains("/svg")) {
@@ -157,7 +172,10 @@ fun ProfileScreen(
                 }
             }
 
-            // --- Tabs 选项卡 ---
+            /**
+             * Tabs 选项卡
+             * 0: 我的动态 | 1: 我的点赞 | 2: 我的收藏 | 3: 我的智能体
+             */
             TabRow(selectedTabIndex = uiState.activeTab) {
                 Tab(selected = uiState.activeTab == 0, onClick = { viewModel.switchTab(0) }, icon = { Icon(Icons.Default.GridOn, null) }, text = { Text("动态") })
                 Tab(selected = uiState.activeTab == 1, onClick = { viewModel.switchTab(1) }, icon = { Icon(Icons.Default.Favorite, null) }, text = { Text("点赞") })
@@ -165,14 +183,17 @@ fun ProfileScreen(
                 Tab(selected = uiState.activeTab == 3, onClick = { viewModel.switchTab(3) }, icon = { Icon(Icons.Default.Person, null) }, text = { Text("智能体") })
             }
 
-            // --- 内容列表 ---
+            // --- 内容列表区域 ---
             Box(modifier = Modifier.fillMaxSize().background(Color(0xFFF5F5F5))) {
                 if (uiState.isLoading) {
+                    // 加载中显示进度指示器
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 } else {
                     when (uiState.activeTab) {
                         3 -> {
-                            // 智能体列表
+                            /**
+                             * 智能体列表 - 使用2列网格布局
+                             */
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(2),
                                 contentPadding = PaddingValues(8.dp),
@@ -180,11 +201,12 @@ fun ProfileScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 items(uiState.myPersonas) { persona ->
-                                    // ✅ [New] 智能体头像处理逻辑
-                                    // 如果头像为空，使用 DiceBear bottts 风格生成 PNG 头像
+                                    /**
+                                     * 智能体头像处理逻辑
+                                     * 如果头像为空,使用 DiceBear avataaars 风格生成 PNG 头像
+                                     */
                                     val personaAvatar = if (persona.avatarUrl.isNullOrBlank()) {
-                                        "https://api.dicebear.com/7.x//avataaars/png?seed=${persona.name}"
-                                        ///avataaars
+                                        "https://api.dicebear.com/7.x/avataaars/png?seed=${persona.name}"
                                     } else {
                                         persona.avatarUrl
                                     }
@@ -201,8 +223,8 @@ fun ProfileScreen(
                                                 modifier = Modifier
                                                     .size(50.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color.LightGray), // 添加底色，防止透明图看不清
-                                                contentScale = ContentScale.Crop // 确保填充满
+                                                    .background(Color.LightGray),
+                                                contentScale = ContentScale.Crop
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
                                             Text(
@@ -217,7 +239,9 @@ fun ProfileScreen(
                             }
                         }
                         else -> {
-                            // 动态/点赞/收藏列表 -> 三列瀑布流
+                            /**
+                             * 动态/点赞/收藏列表 - 使用三列瀑布流布局
+                             */
                             val posts = when(uiState.activeTab) {
                                 0 -> uiState.myPosts
                                 1 -> uiState.myLikes
@@ -246,6 +270,10 @@ fun ProfileScreen(
 
 /**
  * 瀑布流单项卡片
+ * 根据是否有图片显示不同样式
+ *
+ * @param post 帖子数据
+ * @param onClick 点击回调
  */
 @Composable
 fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
@@ -261,9 +289,9 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
     ) {
         Box {
             if (hasImage) {
-                // === 样式 A：有图片 ===
+                // === 样式 A:有图片 ===
                 Box {
-                    // 1. 图片
+                    // 1. 显示第一张图片
                     AsyncImage(
                         model = post.imageUrls[0],
                         contentDescription = null,
@@ -273,7 +301,7 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
                         contentScale = ContentScale.Crop
                     )
 
-                    // 2. 底部黑色渐变遮罩
+                    // 2. 底部黑色渐变遮罩,用于显示点赞数
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -286,7 +314,7 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
                             )
                     )
 
-                    // 3. 点赞数
+                    // 3. 点赞数,显示在遮罩上
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -308,12 +336,13 @@ fun WaterfallPostItem(post: PostDto, onClick: () -> Unit) {
                     }
                 }
             } else {
-                // === 样式 B：纯文字 ===
+                // === 样式 B:纯文字 ===
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(8.dp)
                 ) {
+                    // 显示文字内容,最多6行
                     Text(
                         text = post.content,
                         style = MaterialTheme.typography.bodySmall,

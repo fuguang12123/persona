@@ -18,6 +18,15 @@ class PersonaRepository @Inject constructor(
     private val api: PersonaService,
     private val userPrefs: UserPreferencesRepository
 ) {
+    /**
+     * @class com.example.persona.data.repository.PersonaRepository
+     * @description Persona 领域仓库，负责广场信息流、本地缓存转换、推荐与关注相关逻辑，以及创建/更新 Persona 的数据通路。通过 `PersonaService` 获取远端数据并写入 Room，实现 UI 的单一数据源与快速回显；创建成功后主动刷新第一页，提升用户反馈体验。与《最终作业.md》对应基础与进阶：Persona 创作（B1）、社交广场（B2/B3）、智能推荐（C5）、从 Mock 到真实服务（C3）。
+     * @author Persona Team <persona@project.local>
+     * @version v1.0.0
+     * @since 2025-11-30
+     * @see com.example.persona.data.remote.PersonaService
+     * @关联功能 REQ-B1/B2/B3；REQ-C5 推荐；REQ-C3 架构演进
+     */
 
     // 获取本地缓存流
     fun getFeedStream(): Flow<List<Persona>> {
@@ -26,6 +35,12 @@ class PersonaRepository @Inject constructor(
         }
     }
 
+    /**
+     * 功能: 拉取广场数据（分页），并落库以供 UI 复用；支持推荐模式与普通模式。
+     * 实现逻辑: 根据 type 切换接口；成功则写入 Room。
+     * @return Boolean - 是否可能还有下一页（以 size 判断）
+     * 关联功能: REQ-B3 社交广场-浏览与互动
+     */
     suspend fun fetchFeed(page: Int, size: Int, type: String = "all"): Boolean {
         return try {
             if (type == "recommend") {
@@ -97,7 +112,7 @@ class PersonaRepository @Inject constructor(
         return try {
             val res = api.getFollowStatus(id)
             res.isSuccess() && res.data == true
-        } catch (e: Exception) { false }
+        } catch (   e: Exception) { false }
     }
 
     suspend fun getFollowedPersonas(): List<Persona> {
@@ -121,6 +136,12 @@ class PersonaRepository @Inject constructor(
     // ----------------------------------------------------------------
     // 🔥 [核心修改] 创建成功后，自动拉取第一页数据
     // ----------------------------------------------------------------
+    /**
+     * 功能: 创建 Persona 成功后自动拉取第一页数据，实现列表的即时更新（无手动刷新）。
+     * 实现逻辑: POST 创建 -> 成功后调用 `fetchFeed(1,20)`。
+     * 返回值: Boolean - 创建结果
+     * 关联功能: REQ-B1 Persona创作；REQ-C3 架构演进-数据源联动
+     */
     suspend fun createPersona(persona: Persona): Boolean {
         return try {
             val response = api.createPersona(persona)

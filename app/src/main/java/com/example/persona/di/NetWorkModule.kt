@@ -22,6 +22,16 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
+    /**
+     * @class com.example.persona.di.NetworkModule
+     * @description Hilt 单例网络模块，提供 `SessionManager`、`AuthInterceptor`、`OkHttpClient`、`Retrofit` 及各服务接口实例。通过拦截器统一处理认证与日志，设置合理的超时与重试策略，保障在弱网环境下的鲁棒性。该模块是 Clean Architecture 中的数据源注入点，上层通过 Repository 使用，避免直接依赖具体实现。对应《最终作业.md》的工程质量与架构设计要求。
+     * @author Persona Team <persona@project.local>
+     * @version v1.0.0
+     * @since 2025-11-30
+     * @see com.example.persona.data.remote.AuthInterceptor
+     * @关联功能 REQ-C3 架构演进-网络层注入
+     */
+
     private val BASE_URL: String
         get() {
             val port = "8080"

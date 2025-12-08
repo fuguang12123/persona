@@ -24,6 +24,15 @@ class LocalLLMService @Inject constructor(
     private val memoryDao: UserMemoryDao,
     private val personaDao: PersonaDao
 ) {
+    /**
+     * @class com.example.persona.data.service.LocalLLMService
+     * @description 端侧大语言模型推理服务，负责在“私密模式”下以本地模型完成对话生成与记忆摘要。通过 `callbackFlow` 实现流式输出，结合 IO 调度保证推理与数据库写入的线程隔离。服务采用 Gemma 量化模型（示例），并提供模型初始化检查、分片输出、阈值记忆摘要等机制，满足《最终作业.md》进阶挑战中的端云协同混合架构（C4）与富交互体验（C1）。
+     * @author Persona Team <persona@project.local>
+     * @version v1.0.0
+     * @since 2025-11-30
+     * @see com.example.persona.data.repository.ChatRepository
+     * @关联功能 REQ-C1 富文本与流式输出；REQ-C4 端云协同混合架构
+     */
     private var llmInference: LlmInference? = null
 
     // 保持使用 CPU 版本以确保兼容性
@@ -33,6 +42,12 @@ class LocalLLMService @Inject constructor(
     // [New] 消息计数器，用于控制记忆生成频率 (Key: "userId_personaId")
     private val messageCounters = ConcurrentHashMap<String, Int>()
 
+    /**
+     * 功能: 初始化端侧推理模型（IO 线程），校验文件存在并创建推理器。
+     * 实现逻辑: 检查模型文件 -> 构建 Options -> 创建 `LlmInference`。
+     * 返回值: Boolean - true 表示初始化成功；false 表示缺失或异常。
+     * 关联功能: REQ-C4 端云协同-端侧模型集成
+     */
     suspend fun initModel(): Boolean = withContext(Dispatchers.IO) {
         if (!modelFile.exists()) {
             Log.e("LocalLLM", "❌ 错误：找不到模型文件！请确保已上传 ${modelFile.absolutePath}")
@@ -57,6 +72,20 @@ class LocalLLMService @Inject constructor(
     }
 
     // 生成回复
+    /**
+     * 功能: 基于端侧模型生成流式回复，返回 `Flow<String>` 的分片文本，供 UI 渐进呈现。
+     * 实现逻辑:
+     * 1. 若未初始化则尝试初始化模型
+     * 2. 拼接角色设定、记忆上下文与用户消息，构造完整 Prompt
+     * 3. 通过 `generateResponseAsync` 推送分片至 Flow，结束时关闭流
+     * @param userId Long - 用户ID
+     * @param personaId Long - Persona ID
+     * @param userContent String - 用户输入
+     * @return Flow<String> - 文本分片流
+     * 关联功能: REQ-C1 流式输出；REQ-C4 端云协同-私聊端侧路径
+     * 复杂度分析: 时间 O(T)（与生成长度相关）| 空间 O(1)
+     * 线程安全: 是 - `flowOn(Dispatchers.IO)` 确保在 IO 线程推理
+     */
     fun generateResponse(userId: Long, personaId: Long, userContent: String): Flow<String> = callbackFlow<String> {
         if (llmInference == null) {
             if (!initModel()) {
@@ -114,6 +143,18 @@ class LocalLLMService @Inject constructor(
     }.flowOn(Dispatchers.IO)
 
     // 总结记忆
+    /**
+     * 功能: 对对话进行周期性摘要并持久化到本地记忆库，以实现“记忆共生”。
+     * 实现逻辑:
+     * 1. 频率阈值（每5次）控制，降低写入与成本
+     * 2. 构造分析 Prompt，生成事实性摘要
+     * 3. 过滤无效结果并写入 Room
+     * @param userId Long - 用户ID
+     * @param personaId Long - Persona ID
+     * @param chatContent String - 对话拼接文本
+     * @return Unit
+     * 关联功能: REQ-C4 端云协同-记忆影响；REQ-B5/B6 共生与行为影响
+     */
     suspend fun summarizeAndSaveMemory(userId: Long, personaId: Long, chatContent: String) = withContext(Dispatchers.IO) {
         val key = "${userId}_${personaId}"
         val count = messageCounters.getOrDefault(key, 0) + 1

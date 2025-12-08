@@ -50,6 +50,13 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 
+/**
+ * 编辑个人资料界面
+ * 支持修改昵称、头像和背景图,并在未保存时提示用户
+ *
+ * @param viewModel 编辑资料视图模型,使用Hilt注入
+ * @param onBack 返回按钮点击回调
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditProfileScreen(
@@ -62,7 +69,10 @@ fun EditProfileScreen(
     // 控制是否显示"未保存退出"的确认弹窗
     var showExitDialog by remember { mutableStateOf(false) }
 
-    // 处理返回逻辑的函数
+    /**
+     * 处理返回逻辑的函数
+     * 如果有未保存的修改,显示确认弹窗;否则直接返回
+     */
     val handleBack = {
         if (uiState.hasChanges) {
             showExitDialog = true
@@ -71,21 +81,31 @@ fun EditProfileScreen(
         }
     }
 
-    // 拦截系统物理返回键/手势
+    /**
+     * 拦截系统物理返回键/手势
+     * 当有未保存的修改时,阻止直接返回,显示确认弹窗
+     */
     BackHandler(enabled = uiState.hasChanges) {
         showExitDialog = true
     }
 
-    // 头像选择器
+    /**
+     * 头像选择器
+     * 使用系统图片选择器,选择后上传
+     */
     val avatarPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? -> uri?.let { viewModel.uploadImage(it, isAvatar = true) } }
 
-    // 背景图选择器
+    /**
+     * 背景图选择器
+     * 使用系统图片选择器,选择后上传
+     */
     val bgPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? -> uri?.let { viewModel.uploadImage(it, isAvatar = false) } }
 
+    // 监听保存成功状态,成功后显示提示并返回
     LaunchedEffect(uiState.isSaved) {
         if (uiState.isSaved) {
             Toast.makeText(context, "保存成功", Toast.LENGTH_SHORT).show()
@@ -93,17 +113,20 @@ fun EditProfileScreen(
         }
     }
 
-    // 未保存退出的确认弹窗
+    /**
+     * 未保存退出的确认弹窗
+     * 提示用户有未保存的修改,询问是否确认退出
+     */
     if (showExitDialog) {
         AlertDialog(
             onDismissRequest = { showExitDialog = false },
             title = { Text("提示") },
-            text = { Text("修改还未保存，是否退出？") },
+            text = { Text("修改还未保存,是否退出?") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showExitDialog = false
-                        onBack() // 确认退出，不保存
+                        onBack() // 确认退出,不保存
                     }
                 ) {
                     Text("退出", color = MaterialTheme.colorScheme.error)
@@ -122,20 +145,20 @@ fun EditProfileScreen(
             TopAppBar(
                 title = { Text("编辑资料") },
                 navigationIcon = {
-                    // 点击左上角返回箭头，同样走拦截逻辑
+                    // 点击左上角返回箭头,走拦截逻辑
                     IconButton(onClick = { handleBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
                 actions = {
                     if (uiState.isLoading) {
+                        // 上传中显示加载指示器
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     } else {
-                        // 只有当有修改时，保存按钮才高亮/可用，或者一直可用但无修改时点击无反应也可以
-                        // 这里保持原样，随时可以点保存
+                        // 保存按钮,只有有修改时才可用
                         IconButton(
                             onClick = { viewModel.saveProfile() },
-                            enabled = uiState.hasChanges // 可选：只有有修改时才允许点击保存
+                            enabled = uiState.hasChanges
                         ) {
                             Icon(
                                 Icons.Default.Check,
@@ -160,7 +183,7 @@ fun EditProfileScreen(
                     .fillMaxWidth()
                     .height(200.dp)
             ) {
-                // 背景图
+                // 背景图,点击可更换
                 AsyncImage(
                     model = uiState.backgroundImageUrl.ifBlank { "https://picsum.photos/800/400" },
                     contentDescription = "Background",
@@ -171,7 +194,7 @@ fun EditProfileScreen(
                             bgPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         }
                 )
-                // 背景图编辑提示
+                // 背景图编辑提示遮罩
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -181,11 +204,11 @@ fun EditProfileScreen(
                     Icon(Icons.Default.CameraAlt, null, tint = Color.White.copy(alpha = 0.7f))
                 }
 
-                // 头像
+                // 头像,居中底部,点击可更换
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .offset(y = 40.dp) // 下移一半
+                        .offset(y = 40.dp) // 下移一半,形成层叠效果
                 ) {
                     AsyncImage(
                         model = uiState.avatarUrl.ifBlank { "" },
@@ -206,6 +229,7 @@ fun EditProfileScreen(
 
             // 2. 表单区域
             Column(modifier = Modifier.padding(16.dp)) {
+                // 昵称输入框
                 OutlinedTextField(
                     value = uiState.nickname,
                     onValueChange = { viewModel.onNicknameChange(it) },
@@ -214,6 +238,7 @@ fun EditProfileScreen(
                     singleLine = true
                 )
 
+                // 显示错误信息
                 if (uiState.error != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(uiState.error!!, color = MaterialTheme.colorScheme.error)

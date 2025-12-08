@@ -54,7 +54,7 @@ class ChatListViewModel @Inject constructor(
         }
         .map { list -> list.distinctBy { it.personaId } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
+//刷新未读通知
     fun refreshUnreadCount() {
         viewModelScope.launch { _unreadCount.value = postRepository.getUnreadCount() }
     }

@@ -37,7 +37,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
-
+/**
+ * 注册界面组合函数
+ * 提供用户注册功能,包括验证码验证
+ *
+ * @param viewModel 注册视图模型,使用Hilt注入
+ * @param onBackClick 返回按钮点击回调
+ * @param onRegisterSuccess 注册成功回调
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegisterScreen(
@@ -47,9 +54,10 @@ fun RegisterScreen(
 ) {
     val context = LocalContext.current
 
+    // 监听注册成功状态
     LaunchedEffect(viewModel.registerSuccess) {
         if (viewModel.registerSuccess) {
-            Toast.makeText(context, "注册成功，欢迎!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "注册成功,欢迎!", Toast.LENGTH_SHORT).show()
             onRegisterSuccess()
         }
     }
@@ -71,12 +79,12 @@ fun RegisterScreen(
                 .padding(padding)
                 .fillMaxSize()
                 .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            // verticalArrangement = Arrangement.Center // 去掉居中，防止键盘遮挡
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("创建新账号", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(32.dp))
 
+            // 用户名输入
             OutlinedTextField(
                 value = viewModel.username,
                 onValueChange = { viewModel.username = it },
@@ -86,6 +94,7 @@ fun RegisterScreen(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
+            // 密码输入
             OutlinedTextField(
                 value = viewModel.password,
                 onValueChange = { viewModel.password = it },
@@ -96,6 +105,7 @@ fun RegisterScreen(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
+            // 确认密码输入
             OutlinedTextField(
                 value = viewModel.confirmPassword,
                 onValueChange = { viewModel.confirmPassword = it },
@@ -107,11 +117,12 @@ fun RegisterScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // [New] 验证码区域
+            // 验证码输入区域
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // 验证码输入框
                 OutlinedTextField(
                     value = viewModel.captchaCodeInput,
                     onValueChange = { viewModel.captchaCodeInput = it },
@@ -122,7 +133,7 @@ fun RegisterScreen(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // 验证码图片
+                // 验证码图片,点击刷新
                 if (viewModel.captchaBitmap != null) {
                     Image(
                         bitmap = viewModel.captchaBitmap!!.asImageBitmap(),
@@ -130,7 +141,7 @@ fun RegisterScreen(
                         modifier = Modifier
                             .height(56.dp)
                             .width(100.dp)
-                            .clickable { viewModel.refreshCaptcha() }, // 点击刷新
+                            .clickable { viewModel.refreshCaptcha() },
                         contentScale = ContentScale.FillBounds
                     )
                 } else {
@@ -146,6 +157,7 @@ fun RegisterScreen(
                 }
             }
 
+            // 显示错误信息
             if (viewModel.uiState is LoginUiState.Error) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -156,6 +168,7 @@ fun RegisterScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            // 注册按钮
             Button(
                 onClick = { viewModel.onRegisterClick() },
                 modifier = Modifier.fillMaxWidth().height(50.dp),

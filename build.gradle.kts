@@ -6,4 +6,6 @@ plugins {
     // 添加下面这两个关键插件
     alias(libs.plugins.google.devtools.ksp) apply false
     alias(libs.plugins.google.dagger.hilt) apply false
+    alias(libs.plugins.jetbrains.dokka) apply false
+
 }

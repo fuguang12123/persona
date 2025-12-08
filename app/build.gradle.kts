@@ -6,6 +6,7 @@ plugins {
     // 应用 KSP 和 Hilt 插件
     alias(libs.plugins.google.devtools.ksp)
     alias(libs.plugins.google.dagger.hilt)
+    alias(libs.plugins.jetbrains.dokka)
 }
 
 android {
@@ -89,6 +90,9 @@ dependencies {
     // 添加 Material Extended 图标库
     implementation("androidx.compose.material:material-icons-extended:1.6.8") // 版本号请跟随你的 compose 版本，通常 1.6.x 或 1.7.x
 
+    // 注释辅助：AndroidX 注解库（用于 @NonNull/@IntRange 等注释引用解析）
+    implementation("androidx.annotation:annotation:1.7.1")
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -98,4 +102,15 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
+}
+
+// Dokka 输出配置
+tasks.dokkaHtml.configure {
+    outputDirectory.set(buildDir.resolve("dokka/html"))
+}
+tasks.dokkaGfm.configure {
+    outputDirectory.set(buildDir.resolve("dokka/gfm"))
+}
+tasks.register("dokkaXml") {
+    dependsOn("dokkaHtml")
 }
